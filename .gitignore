@@ -29,6 +29,6 @@ build/
 packages/cli/ryskV12-*
 
 # CLI binaries dropped into the SDK packages by `make dev-bin`
-packages/ts/ryskV12
-packages/py/ryskV12
-packages/py/ryskV12cli
+# (packages/py/ryskV12 is the python package itself, hence the exact names)
+/packages/ts/ryskV12
+/packages/py/ryskV12cli

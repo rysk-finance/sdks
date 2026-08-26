@@ -23,8 +23,8 @@ make help        # everything else
 ```
 
 `make dev-bin` puts a locally built binary at `packages/ts/ryskV12` and
-`packages/py/ryskV12`, which is the default path both SDKs look for, so examples
-and e2e runs use your working tree instead of a published release.
+`packages/py/ryskV12cli` — the paths the TS and python examples already pass to
+the SDK — so examples and e2e runs use your working tree, not a published release.
 
 ## Releasing
 

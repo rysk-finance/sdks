@@ -28,18 +28,19 @@ build-py:
 	cd $(PY_DIR) && poetry build
 
 # Local dev/e2e: the SDKs shell out to a CLI binary next to the package
-# (`./ryskV12` by default), which in published packages is downloaded by
+# (`./ryskV12` for TS, `./ryskV12cli` for python), which in published packages
+# is downloaded by
 # scripts/fetch_latest_release.sh. Build it from source instead.
 dev-bin:
 	cd $(CLI_DIR) && go build -ldflags="$(LDFLAGS)" -o ryskV12-dev
 	cp $(CLI_DIR)/ryskV12-dev $(TS_DIR)/ryskV12
-	cp $(CLI_DIR)/ryskV12-dev $(PY_DIR)/ryskV12
-	chmod +x $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12
-	@echo "CLI $(VERSION) installed at $(TS_DIR)/ryskV12 and $(PY_DIR)/ryskV12"
+	cp $(CLI_DIR)/ryskV12-dev $(PY_DIR)/ryskV12cli
+	chmod +x $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli
+	@echo "CLI $(VERSION) installed at $(TS_DIR)/ryskV12 and $(PY_DIR)/ryskV12cli"
 
 test-py:
 	cd $(PY_DIR) && poetry run pytest
 
 clean:
-	rm -f $(CLI_DIR)/ryskV12-* $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12
+	rm -f $(CLI_DIR)/ryskV12-* $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli
 	rm -rf $(TS_DIR)/dist $(PY_DIR)/dist
