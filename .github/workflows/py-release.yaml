@@ -1,0 +1,63 @@
+name: Release Python SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/py/**"
+      - ".github/workflows/py-release.yaml"
+
+permissions:
+  contents: write
+
+jobs:
+  release_and_publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    defaults:
+      run:
+        working-directory: packages/py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install poetry
+        run: pipx install poetry
+
+      - name: Get current version
+        id: v
+        run: echo "version=$(poetry version --short)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: check
+        run: |
+          if git rev-parse -q --verify "refs/tags/py-v${{ steps.v.outputs.version }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build package
+        if: steps.check.outputs.exists == 'false'
+        run: poetry build
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: py-v${{ steps.v.outputs.version }}
+          name: Python SDK v${{ steps.v.outputs.version }}
+          target_commitish: main
+
+      - name: Upload to PyPI
+        if: steps.check.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/py/dist
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}

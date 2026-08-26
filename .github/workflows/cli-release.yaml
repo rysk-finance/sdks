@@ -1,0 +1,44 @@
+name: Release CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CLI version, without prefix (e.g. 3.0.4)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cli
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/cli/go.mod
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./build.sh
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cli-v${{ inputs.version }}
+          name: CLI v${{ inputs.version }}
+          target_commitish: main
+          files: |
+            packages/cli/ryskV12-linux-amd64
+            packages/cli/ryskV12-linux-arm64
+            packages/cli/ryskV12-darwin-arm64

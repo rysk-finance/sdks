@@ -1,0 +1,34 @@
+.DS_Store
+.jack
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode-test
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+*.tgz
+.yarn-integrity
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Go / CLI build output
+packages/cli/ryskV12-*
+
+# CLI binaries dropped into the SDK packages by `make dev-bin`
+packages/ts/ryskV12
+packages/py/ryskV12
+packages/py/ryskV12cli

@@ -1,0 +1,60 @@
+name: Release TS SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/ts/**"
+      - ".github/workflows/ts-release.yaml"
+
+permissions:
+  contents: write
+
+jobs:
+  release_and_publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/ts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Get current version
+        id: v
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: check
+        run: |
+          if git rev-parse -q --verify "refs/tags/ts-v${{ steps.v.outputs.version }}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install and build
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          yarn install --frozen-lockfile --ignore-scripts
+          yarn build
+
+      - name: Create release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ts-v${{ steps.v.outputs.version }}
+          name: TS SDK v${{ steps.v.outputs.version }}
+          target_commitish: main
+
+      - name: Publish to NPM
+        if: steps.check.outputs.exists == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

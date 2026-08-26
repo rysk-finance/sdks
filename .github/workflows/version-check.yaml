@@ -1,0 +1,63 @@
+name: Check version bump
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/ts/**"
+      - "packages/py/**"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ts
+            path: packages/ts
+          - package: py
+            path: packages/py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes in ${{ matrix.path }}
+        id: changed
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- "${{ matrix.path }}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare versions
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          read_version() {
+            case "${{ matrix.package }}" in
+              ts) jq -r .version ;;
+              py) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
+            esac
+          }
+          case "${{ matrix.package }}" in
+            ts) manifest="${{ matrix.path }}/package.json" ;;
+            py) manifest="${{ matrix.path }}/pyproject.toml" ;;
+          esac
+
+          base=$(git show "origin/${{ github.base_ref }}:$manifest" | read_version)
+          pr=$(read_version < "$manifest")
+          echo "base=$base pr=$pr"
+
+          if [ "$base" = "$pr" ]; then
+            echo "::error::$manifest version not bumped ($base)."
+            exit 1
+          fi
+          newest=$(printf '%s\n%s\n' "$base" "$pr" | sort -V | tail -n 1)
+          if [ "$newest" != "$pr" ]; then
+            echo "::error::$manifest version $pr is older than base $base."
+            exit 1
+          fi
+          echo "Version bumped: $base -> $pr"
