@@ -1,14 +1,27 @@
 import asyncio
 from dataclasses import asdict, dataclass
 from enum import Enum
+import os
 from os import path
 import subprocess
 from subprocess import PIPE, Popen
 import sys
 import json
+import re
 from typing import List, Optional, Tuple
 
 from .models import Quote, Transfer
+
+
+RELEASES_URL = "https://github.com/rysk-finance/ryskV12/releases"
+
+
+def _parse_version(raw: str) -> Optional[Tuple[int, int, int]]:
+    """Parses a leading semver out of "3.2.0", "v3.2.0" or "3.2.0-rc1"."""
+    match = re.match(r"v?(\d+)\.(\d+)\.(\d+)", raw.strip())
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
 
 class Env(Enum):
@@ -40,84 +53,92 @@ class Rysk:
         env: Env,
         private_key: str,
         v12_cli_path: str = "./ryskV12",
+        strict_version: bool = False,
     ):
+        """strict_version raises instead of warning when the CLI is too old."""
         self._env = env
         self._cli_path = v12_cli_path
         self._private_key = private_key
+        self._strict_version = strict_version
         self._sdk_version_check()
 
     def _url(self, uri: str):
         return f"{ENV_CONFIGS.get(self._env).base_url}{uri}"
     
-    def setup(self):
-        script_path = path.join(path.dirname(path.abspath(__file__)), "scripts/fetch_latest_release.sh")
-        Popen(
-            ["chmod", "+x", script_path],
-            shell=False,
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True,
-        )
-        Popen(
-            [
-                script_path
-            ],
-            shell=False,
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True,
-        )
-        Popen(
-            ["chmod", "+x", "ryskV12"],
-            shell=False,
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True,
-        )
+    def setup(self) -> str:
+        """Downloads the CLI release into the working directory as ./ryskV12 and
+        makes it executable, returning that path.
 
-    
-    def _sdk_version_check(self):
-        def _trigger_error():
-            print(
-                f"{self._cli_path} version too low: min {self._min_sdk_version}.\n"
-                "Download it here https://github.com/rysk-finance/ryskV12/releases.",
-                file=sys.stderr
+        This blocks: the SDK cannot spawn a binary that is still downloading.
+        """
+        script_path = path.join(
+            path.dirname(path.abspath(__file__)), "scripts/fetch_latest_release.sh"
+        )
+        os.chmod(script_path, 0o755)
+
+        result = subprocess.run([script_path], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"failed to download the cli: {(result.stderr or result.stdout).strip()}"
             )
-        
+
+        downloaded = "ryskV12"
+        if not path.exists(downloaded):
+            # the script reports missing dependencies on stdout and still exits 0
+            raise RuntimeError(
+                f"the download script left no {downloaded}: {(result.stdout or result.stderr).strip()}"
+            )
+        os.chmod(downloaded, 0o755)
+        return downloaded
+
+    def _sdk_version_check(self):
         try:
-            # subprocess.run is the modern equivalent to child_process.exec
             result = subprocess.run(
                 [self._cli_path, "version"],
-                capture_output=True, # Captures both stdout and stderr
-                text=True,           # Decodes bytes to string automatically
-                check=False          # Don't raise exception on non-zero exit code
+                capture_output=True,
+                text=True,
+                check=False,
             )
         except FileNotFoundError:
-            print(f"exec error: Executable not found: {self._cli_path}", file=sys.stderr)
+            print(
+                f"{self._cli_path} not found.\nDownload it here {RELEASES_URL}.",
+                file=sys.stderr,
+            )
             return
         except Exception as e:
-            print(f"exec error: {e}", file=sys.stderr)
+            print(f"{self._cli_path} could not be run: {e}", file=sys.stderr)
             return
 
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
 
-        is_version_too_low = False
-        if stdout:
-            try:
-                current_major = float(stdout[0])
-                min_major = float(self._min_sdk_version[0])
-                is_version_too_low = current_major < min_major
-            except ValueError:
-                pass
+        # a cli old enough to have no version command predates every version we support
+        if "No help topic for 'version'" in stderr or not stdout:
+            self._report_version("too old to report a version")
+            return
 
-        if "No help topic for 'version'" in stderr:
-            _trigger_error()
-        elif not stdout:
-            _trigger_error()
-        elif is_version_too_low:
-            _trigger_error()
+        found = _parse_version(stdout)
+        if found is None:
+            # a locally built cli reports something like "dev"; nothing to compare
+            return
+        if found < _parse_version(self._min_sdk_version):
+            self._report_version(stdout)
 
+    def _report_version(self, found: str):
+        message = (
+            f"{self._cli_path} is {found}, but this sdk needs {self._min_sdk_version} "
+            f"or newer. Commands added since {found} will fail with "
+            f'"flag provided but not defined".\nDownload it here {RELEASES_URL}.'
+        )
+        if self._strict_version:
+            raise RuntimeError(message)
+        print(message, file=sys.stderr)
+
+    def _child_env(self):
+        """The private key is handed to the CLI through RYSK_PRIVATE_KEY rather
+        than as an argument, so it never shows up in ps or a shell history.
+        Spawning the CLI yourself means setting that variable too."""
+        return {**os.environ, "RYSK_PRIVATE_KEY": self._private_key}
 
     def execute(self, args: List[str] = []):
         return Popen(
@@ -126,6 +147,7 @@ class Rysk:
             stdout=PIPE,
             stderr=PIPE,
             text=True,
+            env=self._child_env(),
         )
 
     async def execute_async(self, args: List[str] = [], callback = print):
@@ -134,7 +156,7 @@ class Rysk:
             *args,
             stdout=PIPE,
             stderr=PIPE,
-            text=False,
+            env=self._child_env(),
         )
         while True:
             line = await process.stdout.readline()
@@ -158,8 +180,6 @@ class Rysk:
             amount,
             "--rpc_url",
             rpc_url,
-            "--private_key",
-            self._private_key,
         ]
 
     def balances_args(self, channel_id: str, account: str):
@@ -180,8 +200,6 @@ class Rysk:
             transfer.amout,
             "--nonce",
             transfer.nonce,
-            "--private_key",
-            self._private_key,
         ]
         if transfer.is_deposit:
             base.append("--is_deposit")
@@ -264,8 +282,6 @@ class Rysk:
             quote.price,
             "--valid_until",
             str(quote.validUntil),
-            "--private_key",
-            self._private_key,
             *self._premium_domain_args(quote),
             *self._premium_url_args(url),
         ]
@@ -283,8 +299,6 @@ class Rysk:
             "quote",
             "--batch",
             source,
-            "--private_key",
-            self._private_key,
             *self._premium_url_args(url),
         ]
 
@@ -314,8 +328,6 @@ class Rysk:
             str(chain_id),
             "--nonce",
             nonce,
-            "--private_key",
-            self._private_key,
             *self._premium_url_args(url),
         ]
 
@@ -348,8 +360,6 @@ class Rysk:
             quote.usd,
             "--collateral",
             quote.collateralAsset,
-            "--private_key",
-            self._private_key,
         ]
         if quote.premiumAsset:
             base.extend(["--premium_asset", quote.premiumAsset])

@@ -14,15 +14,31 @@ Python wrapper for ryskV12 cli
 
 ## Run
 
+### The private key never reaches argv
+
+`execute` and `execute_async` hand the key to the CLI through `RYSK_PRIVATE_KEY` in the child's
+environment, so it does not show up in `ps` or a shell history, and the `*_args` builders do not
+contain it. If you spawn the CLI yourself, set that variable too, or the CLI will stop with
+`Required flag "private_key" not set`.
+
 ### Instantiation
 
 ```python
 from ryskV12.client import Rysk, Env
 
 private_key = "YOUR_PRIVATE_KEY"
-env = Env.TESTNET
-rysk_sdk = Rysk(env=env, private_key=private_key, v12_cli_path="/path/to/ryskV12")  # Optional CLI path
+rysk_sdk = Rysk(env=Env.TESTNET, private_key=private_key, v12_cli_path="./ryskV12")
+
+# strict_version raises instead of warning when the cli is older than this sdk
+rysk_sdk = Rysk(env=Env.TESTNET, private_key=private_key, strict_version=True)
+
+# and if you have no cli yet, setup() downloads one and returns its path
+cli_path = Rysk(env=Env.TESTNET, private_key=private_key).setup()
 ```
+
+The constructor checks the CLI's version (major, minor and patch) and warns when it is older than the
+SDK needs, because commands added since then fail with `flag provided but not defined`. A locally
+built CLI reports no version number and is left alone.
 
 ### Create a Connection
 

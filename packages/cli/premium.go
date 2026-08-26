@@ -51,9 +51,10 @@ var premiumAction = &cli.Command{
 
 func premiumURLFlag() cli.Flag {
 	return &cli.StringFlag{
-		Name:  "url",
-		Value: PREMIUM_URL,
-		Usage: "base url of the premium rfq api",
+		Name:    "url",
+		Value:   PREMIUM_URL,
+		EnvVars: []string{"RYSK_PREMIUM_URL"},
+		Usage:   "base url of the premium rfq api",
 	}
 }
 
@@ -131,6 +132,7 @@ var premiumCancelAction = &cli.Command{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key of the quote's maker",
+			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -204,8 +206,9 @@ var premiumQuoteAction = &cli.Command{
 			Usage: "quote expiry in unix seconds, strictly between now+2min and now+10min",
 		},
 		&cli.StringFlag{
-			Name:  "private_key",
-			Usage: "private key to sign the quote with",
+			Name:    "private_key",
+			Usage:   "private key to sign the quote with",
+			EnvVars: []string{"RYSK_PRIVATE_KEY"},
 		},
 		&cli.StringFlag{
 			Name:  "domain_name",
@@ -311,13 +314,20 @@ func (client *premiumClient) do(method string, path string, query url.Values, bo
 
 // premiumStatusError maps the api's failure statuses onto errors. A rate limited
 // response carries the body "cc", which is worth spelling out.
-func premiumStatusError(status int, body []byte) error {
+func premiumStatusError(baseURL string, status int, body []byte) error {
 	trimmed := strings.TrimSpace(string(body))
 	switch {
 	case status == http.StatusTooManyRequests:
 		return fmt.Errorf("rate limited (%d): the api allows 30 requests/second per ip, body %q", status, trimmed)
 	case status >= 200 && status < 300:
 		return nil
+	case status == http.StatusNotFound && strings.Contains(trimmed, "404 page not found"):
+		// the host answered but has no such route: usually the rfq api is not
+		// deployed at this base url rather than a bad id
+		return fmt.Errorf(
+			"%s has no rfq routes (%d %s): point --url (or RYSK_PREMIUM_URL) at an api that serves them",
+			baseURL, status, trimmed,
+		)
 	default:
 		return fmt.Errorf("api returned %d: %s", status, trimmed)
 	}
@@ -326,11 +336,12 @@ func premiumStatusError(status int, body []byte) error {
 // premiumProxy runs a read and prints the api's response as it came, so callers
 // keep working when the api grows a field.
 func premiumProxy(c *cli.Context, method string, path string, query url.Values) error {
-	status, body, err := newPremiumClient(c.String("url")).do(method, path, query, nil, nil)
+	client := newPremiumClient(c.String("url"))
+	status, body, err := client.do(method, path, query, nil, nil)
 	if err != nil {
 		return err
 	}
-	if err := premiumStatusError(status, body); err != nil {
+	if err := premiumStatusError(client.baseURL, status, body); err != nil {
 		return err
 	}
 
@@ -351,12 +362,13 @@ func premiumCancel(c *cli.Context) error {
 		return err
 	}
 
+	client := newPremiumClient(c.String("url"))
 	path := "/api/quotes/" + url.PathEscape(c.String("id"))
-	status, body, err := newPremiumClient(c.String("url")).do(http.MethodDelete, path, nil, nil, headers)
+	status, body, err := client.do(http.MethodDelete, path, nil, nil, headers)
 	if err != nil {
 		return err
 	}
-	if err := premiumStatusError(status, body); err != nil {
+	if err := premiumStatusError(client.baseURL, status, body); err != nil {
 		return err
 	}
 
@@ -436,11 +448,12 @@ func premiumQuote(c *cli.Context) error {
 		return fmt.Errorf("invalid payload: %w", err)
 	}
 
-	status, res, err := newPremiumClient(c.String("url")).do(http.MethodPost, "/api/quotes", nil, body, nil)
+	client := newPremiumClient(c.String("url"))
+	status, res, err := client.do(http.MethodPost, "/api/quotes", nil, body, nil)
 	if err != nil {
 		return err
 	}
-	if err := premiumStatusError(status, res); err != nil {
+	if err := premiumStatusError(client.baseURL, status, res); err != nil {
 		return err
 	}
 	return premiumQuoteResult(res, len(payloads))

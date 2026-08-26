@@ -24,6 +24,18 @@ This CLI allows you to connect to a WebSocket server, send signed messages for a
     ```
     This will create an executable file named `ryskV12` in the current directory.
 
+## Environment
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `RYSK_PRIVATE_KEY` | every command that signs | Supplies `--private_key`, so the key stays out of `argv` where `ps` and shell history can see it. The flag still works and takes precedence. |
+| `RYSK_PREMIUM_URL` | `premium` | Supplies `--url`, so a staging or local api is pointed at once instead of on every call. |
+
+```sh
+export RYSK_PRIVATE_KEY=<hex private key>
+./ryskV12 premium quotes --maker 0x...
+```
+
 ## Usage
 
 The `ryskV12` CLI provides the following commands:
@@ -148,7 +160,9 @@ follows `--chain_id`.
 
 Maker actions against the premium RFQ api (`https://premium.rysk.finance`, override with `--url`).
 These are plain HTTP calls, so they need no `connect` and no channel: each subcommand does one
-request and prints the api's response on stdout as it came.
+request and prints the api's response on stdout as it came. Set `RYSK_PREMIUM_URL` instead of passing
+`--url` every time; a host that answers but has no RFQ routes is reported as such rather than as a
+missing id.
 
 ```bash
 ./ryskV12 premium requests --maker <0xmaker>

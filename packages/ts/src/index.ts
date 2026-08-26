@@ -112,45 +112,102 @@ const ENV_CONFIGS: { [key in Env]: EnvConfig } = {
   [Env.MAINNET]: new EnvConfig("wss://v12.rysk.finance/"),
 };
 
+const RELEASES_URL = "https://github.com/rysk-finance/ryskV12/releases";
+
+type Version = [number, number, number];
+
+/** Parses a leading semver out of `3.2.0`, `v3.2.0` or `3.2.0-rc1`. */
+function parseVersion(raw: string): Version | null {
+  const match = raw.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+/** Compares major, then minor, then patch - not just the first digit. */
+function compareVersions(left: Version, right: Version) {
+  const [leftMajor, leftMinor, leftPatch] = left;
+  const [rightMajor, rightMinor, rightPatch] = right;
+
+  if (leftMajor !== rightMajor) return leftMajor < rightMajor ? -1 : 1;
+  if (leftMinor !== rightMinor) return leftMinor < rightMinor ? -1 : 1;
+  if (leftPatch !== rightPatch) return leftPatch < rightPatch ? -1 : 1;
+  return 0;
+}
+
 class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
   private _minSdkVersion: string = "3.2.0";
+  private _strictVersion: boolean;
 
-  constructor(env: Env, privateKey: string, v12CliPath: string = "./ryskV12") {
+  /**
+   * @param strictVersion throw instead of warning when the CLI is too old.
+   */
+  constructor(
+    env: Env,
+    privateKey: string,
+    v12CliPath: string = "./ryskV12",
+    strictVersion: boolean = false,
+  ) {
     this._env = env;
     this._cli_path = v12CliPath;
     this._private_key = privateKey;
+    this._strictVersion = strictVersion;
     this._sdkVersionCheck();
   }
 
   private _sdkVersionCheck() {
     exec([this._cli_path, "version"].join(" "), (error, stdout, stderr) => {
       if (error) {
-        console.error(`exec error: ${error}`);
+        console.error(
+          `${this._cli_path} could not be run: ${error.message}\nDownload it here ${RELEASES_URL}.`,
+        );
         return;
       }
-      switch (true) {
-        case stderr.includes("No help topic for 'version'"):
-        case !stdout:
-        case parseFloat(stdout.at(0)!) < parseFloat(this._minSdkVersion.at(0)!):
-          console.error(
-            `${this._cli_path} version too low: min ${this._minSdkVersion}.\nDownload it here https://github.com/rysk-finance/ryskV12/releases.`,
-          );
-        default:
-          return;
+
+      // a cli old enough to have no version command predates every version we
+      // support
+      if (stderr.includes("No help topic for 'version'") || !stdout.trim()) {
+        this._reportVersion("too old to report a version");
+        return;
+      }
+
+      const found = parseVersion(stdout);
+      if (!found) {
+        // a locally built cli reports something like "dev"; nothing to compare
+        return;
+      }
+      if (compareVersions(found, parseVersion(this._minSdkVersion)!) < 0) {
+        this._reportVersion(stdout.trim());
       }
     });
+  }
+
+  private _reportVersion(found: string) {
+    const message =
+      `${this._cli_path} is ${found}, but this sdk needs ${this._minSdkVersion} or newer. ` +
+      `Commands added since ${found} will fail with "flag provided but not defined".\n` +
+      `Download it here ${RELEASES_URL}.`;
+    if (this._strictVersion) {
+      throw new Error(message);
+    }
+    console.error(message);
   }
 
   private _url(uri: string): string {
     return `${ENV_CONFIGS[this._env].base_url}${uri}`;
   }
 
+  /**
+   * Spawns the CLI. The private key is handed over through RYSK_PRIVATE_KEY in
+   * the child's environment rather than as an argument, so it never shows up in
+   * `ps` or a shell history. Spawning the CLI yourself means setting that
+   * variable too.
+   */
   public execute(args: Array<string> = []) {
     const childProcess = spawn(this._cli_path, args, {
       stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, RYSK_PRIVATE_KEY: this._private_key },
     });
     return new CliWebSocket(childProcess);
   }
@@ -172,8 +229,6 @@ class Rysk {
       amount,
       "--rpc_url",
       rpcURL,
-      "--private_key",
-      this._private_key,
     ];
   }
 
@@ -196,8 +251,6 @@ class Rysk {
       transfer.amount,
       "--nonce",
       transfer.nonce,
-      "--private_key",
-      this._private_key,
       transfer.is_deposit ? "--is_deposit" : "",
     ];
   }
@@ -353,8 +406,6 @@ class Rysk {
       quote.price,
       "--valid_until",
       quote.validUntil.toString(),
-      "--private_key",
-      this._private_key,
       ...this._premiumDomainArgs(quote),
       ...this._premiumURLArgs(url),
       quote.isPut ? "--is_put" : "",
@@ -372,8 +423,6 @@ class Rysk {
       "quote",
       "--batch",
       source,
-      "--private_key",
-      this._private_key,
       ...this._premiumURLArgs(url),
     ];
   }
@@ -410,8 +459,6 @@ class Rysk {
       chainId.toString(),
       "--nonce",
       nonce,
-      "--private_key",
-      this._private_key,
       ...this._premiumURLArgs(url),
     ];
   }
@@ -445,8 +492,6 @@ class Rysk {
       quote.usd,
       "--collateral",
       quote.collateralAsset,
-      "--private_key",
-      this._private_key,
       ...(quote.premiumAsset ? ["--premium_asset", quote.premiumAsset] : []),
       ...this._domainArgs(quote),
       quote.isPut ? "--is_put" : "",

@@ -49,6 +49,7 @@ var transferAction = &cli.Command{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key to sign messages with",
+			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
 	Action: func(c *cli.Context) error {

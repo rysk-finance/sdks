@@ -60,8 +60,16 @@ get_latest_release() {
   fi
   # The monorepo publishes releases for several packages, so /releases/latest is
   # not necessarily the CLI. Pick the newest release tagged "${CLI_TAG_PREFIX}*".
-  curl -s -H "User-Agent: RyskFinanceCLIInstaller" "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=50" |
-    jq -c "[.[] | select(.tag_name | startswith(\"${CLI_TAG_PREFIX}\"))] | first // empty"
+  response=$(curl -s -H "User-Agent: RyskFinanceCLIInstaller" "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=50")
+
+  # a missing repo or a rate limit answers with an object, not a list of releases
+  if ! echo "$response" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    log_error "unexpected response for ${GITHUB_REPO}: $(echo "$response" | jq -r '.message // .' 2>/dev/null | head -1)"
+    log_error "set RYSK_CLI_REPO to the repo that publishes the cli releases."
+    return 1
+  fi
+
+  echo "$response" | jq -c "[.[] | select(.tag_name | startswith(\"${CLI_TAG_PREFIX}\"))] | first // empty"
 }
 
 # Function to get the architecture-specific asset download URL
@@ -101,10 +109,10 @@ get_arch_specific_asset() {
 
   asset_name_pattern="ryskV[0-9]+-${os_name}-${arch_name}"
 
-  release_json=$(get_latest_release)
+  release_json=$(get_latest_release) || return 1
 
   if [ -z "$release_json" ]; then
-    log_error "Failed to fetch latest release from GitHub. Check network connection or repository URL."
+    log_error "${GITHUB_REPO} has no release tagged ${CLI_TAG_PREFIX}*."
     return 1
   fi
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	crypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/goccy/go-json"
 	"github.com/urfave/cli/v2"
 )
@@ -248,22 +249,88 @@ func TestPremiumAuthHeaders(t *testing.T) {
 }
 
 func TestPremiumStatusError(t *testing.T) {
-	if err := premiumStatusError(http.StatusOK, []byte(`{"failures":[]}`)); err != nil {
+	const base = "https://premium.rysk.finance"
+
+	if err := premiumStatusError(base, http.StatusOK, []byte(`{"failures":[]}`)); err != nil {
 		t.Errorf("200: %v", err)
 	}
-	if err := premiumStatusError(http.StatusNoContent, nil); err != nil {
+	if err := premiumStatusError(base, http.StatusNoContent, nil); err != nil {
 		t.Errorf("204: %v", err)
 	}
 
-	err := premiumStatusError(http.StatusTooManyRequests, []byte("cc"))
+	err := premiumStatusError(base, http.StatusTooManyRequests, []byte("cc"))
 	if err == nil || !strings.Contains(err.Error(), "rate limited") {
 		t.Errorf("429 gave %v, want a rate limit error", err)
 	}
 
-	err = premiumStatusError(http.StatusBadRequest, []byte("request expired"))
+	err = premiumStatusError(base, http.StatusBadRequest, []byte("request expired"))
 	if err == nil || !strings.Contains(err.Error(), "request expired") {
 		t.Errorf("400 gave %v, want the body verbatim", err)
 	}
+
+	// a host without the rfq routes is the common case for a wrong --url, so the
+	// error has to say so rather than read like a missing id
+	err = premiumStatusError(base, http.StatusNotFound, []byte("404 page not found"))
+	if err == nil || !strings.Contains(err.Error(), "no rfq routes") || !strings.Contains(err.Error(), base) {
+		t.Errorf("404 gave %v, want it to name the base url and the missing routes", err)
+	}
+
+	// a 404 the api itself wrote is passed through
+	err = premiumStatusError(base, http.StatusNotFound, []byte("quote not found"))
+	if err == nil || !strings.Contains(err.Error(), "quote not found") {
+		t.Errorf("404 gave %v, want the body verbatim", err)
+	}
+}
+
+func TestPremiumPrivateKeyFromEnv(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Write([]byte(`{"failures":[]}`))
+	}))
+	defer server.Close()
+
+	inputs := []premiumQuoteInput{testPremiumQuoteInput(t)}
+	batch, err := json.Marshal(inputs)
+	if err != nil {
+		t.Fatalf("marshal batch: %v", err)
+	}
+	file := t.TempDir() + "/batch.json"
+	if err := os.WriteFile(file, batch, 0o600); err != nil {
+		t.Fatalf("write batch: %v", err)
+	}
+
+	// the key never has to appear in argv, where ps would show it
+	t.Setenv("RYSK_PRIVATE_KEY", testPrivateKey)
+	if _, err := captureStdout(t, func() error {
+		return runPremium("quote", "--url", server.URL, "--batch", file)
+	}); err != nil {
+		t.Fatalf("premium quote with the key in the environment: %v", err)
+	}
+
+	var posted []premiumQuotePayload
+	if err := json.Unmarshal(body, &posted); err != nil {
+		t.Fatalf("body is not a json array: %v (%s)", err, body)
+	}
+	if len(posted) != 1 || posted[0].Signature == "" {
+		t.Fatalf("got %d quotes, want 1 signed one", len(posted))
+	}
+	hash, _, err := CreateQuoteMessage(inputs[0].Quote, mustPremiumDomain(t, inputs[0]))
+	if err != nil {
+		t.Fatalf("CreateQuoteMessage: %v", err)
+	}
+	if signer := recoverSigner(t, hash, posted[0].Signature); signer != testKeyAddress(t) {
+		t.Errorf("signed by %s, want %s", signer, testKeyAddress(t))
+	}
+}
+
+func mustPremiumDomain(t *testing.T, input premiumQuoteInput) *apitypes.TypedDataDomain {
+	t.Helper()
+	domain, err := premiumQuoteDomain(input.ChainID, input.Domain)
+	if err != nil {
+		t.Fatalf("premiumQuoteDomain: %v", err)
+	}
+	return domain
 }
 
 func TestPremiumQuoteResult(t *testing.T) {

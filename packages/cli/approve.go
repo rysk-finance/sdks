@@ -32,6 +32,7 @@ var approveAction = &cli.Command{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key of approving account",
+			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 		&cli.StringFlag{
 			Name:     "asset",

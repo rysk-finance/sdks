@@ -25,13 +25,27 @@ You can then attach listeners to the process to capture `stdout`, `stderr` and e
 //...
 ```
 
+### The private key never reaches argv
+
+`execute` hands the key to the CLI through `RYSK_PRIVATE_KEY` in the child's environment, so it does
+not show up in `ps` or a shell history, and the `*Args` builders do not contain it. If you spawn the
+CLI yourself instead of through `execute`, set that variable too, or the CLI will stop with
+`Required flag "private_key" not set`.
+
 ### Instantiation
 
 ```ts
 const privateKey = "0xYOUR_PRIVATE_KEY";
 const env = Env.TESTNET; // Env.LOCAL | Env.TESTNET | Env.MAINNET
 const ryskSDK = new Rysk(env, privateKey, "/path/to/ryskV12"); // Optional CLI path
+
+// A fourth argument makes a CLI older than this SDK throw instead of warning:
+const strictSDK = new Rysk(env, privateKey, "./ryskV12", true);
 ```
+
+The constructor checks the CLI's version (major, minor and patch) and warns when it is older than the
+SDK needs, because commands added since then fail with `flag provided but not defined`. A locally
+built CLI reports no version number and is left alone.
 
 ### Create a Connection
 

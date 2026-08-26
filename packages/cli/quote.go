@@ -76,6 +76,7 @@ var quoteAction = &cli.Command{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key to sign messages with",
+			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 		&cli.StringFlag{
 			Name:  "premium_asset",
