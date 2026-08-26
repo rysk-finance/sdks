@@ -2,7 +2,7 @@ CLI_DIR := packages/cli
 TS_DIR  := packages/ts
 PY_DIR  := packages/py
 
-VERSION ?= $(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' $(TS_DIR)/package.json)
+VERSION ?= dev
 LDFLAGS := -X 'main.Version=$(VERSION)'
 
 .PHONY: help build build-cli build-ts build-py dev-bin clean test-py
