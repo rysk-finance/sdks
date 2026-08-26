@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -163,43 +162,30 @@ func createEIP712Domain(chainId int64) *apitypes.TypedDataDomain {
 	}
 }
 
-// ParseTypedDataDomain layers a JSON EIP712 domain over the default domain for
-// chainId. The domain has exactly the four fields of the EIP712Domain type -
-// name, version, chainId and verifyingContract - and every one of them must end
-// up set, so the json may override any subset of them but may not drop one or
-// introduce a field (salt included) the type does not carry. An empty json
-// string returns the default domain unchanged.
-func ParseTypedDataDomain(chainId int64, raw string) (*apitypes.TypedDataDomain, error) {
+// TypedDataDomainOverride carries the optional per-field overrides for the
+// EIP712 domain. An empty field means "not set" and keeps the default. The
+// domain's chainId is always the chain the message is for, so it is not
+// overridable.
+type TypedDataDomainOverride struct {
+	Name              string
+	Version           string
+	VerifyingContract string
+}
+
+// CreateTypedDataDomain layers override onto the default domain for chainId.
+// The domain has exactly the four fields of the EIP712Domain type - name,
+// version, chainId and verifyingContract - and each one must end up set.
+func CreateTypedDataDomain(chainId int64, override TypedDataDomainOverride) (*apitypes.TypedDataDomain, error) {
 	domain := *createEIP712Domain(chainId)
 
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return &domain, nil
+	if override.Name != "" {
+		domain.Name = override.Name
 	}
-
-	var override struct {
-		Name              *string               `json:"name"`
-		Version           *string               `json:"version"`
-		ChainId           *math.HexOrDecimal256 `json:"chainId"`
-		VerifyingContract *string               `json:"verifyingContract"`
+	if override.Version != "" {
+		domain.Version = override.Version
 	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&override); err != nil {
-		return nil, fmt.Errorf("invalid domain json: %w", err)
-	}
-
-	if override.Name != nil {
-		domain.Name = *override.Name
-	}
-	if override.Version != nil {
-		domain.Version = *override.Version
-	}
-	if override.ChainId != nil {
-		domain.ChainId = override.ChainId
-	}
-	if override.VerifyingContract != nil {
-		domain.VerifyingContract = *override.VerifyingContract
+	if override.VerifyingContract != "" {
+		domain.VerifyingContract = override.VerifyingContract
 	}
 
 	if domain.Name == "" {
@@ -209,7 +195,7 @@ func ParseTypedDataDomain(chainId int64, raw string) (*apitypes.TypedDataDomain,
 		return nil, errors.New("domain version is empty")
 	}
 	if !common.IsHexAddress(domain.VerifyingContract) {
-		return nil, fmt.Errorf("invalid domain verifyingContract %q", domain.VerifyingContract)
+		return nil, fmt.Errorf("invalid domain verifying contract %q", domain.VerifyingContract)
 	}
 
 	return &domain, nil

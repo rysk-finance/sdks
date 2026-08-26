@@ -123,17 +123,19 @@ Flags
 - `--valid_until` (**required**): Quote validity timestamp.
 - `--collateral` (**required**): Accepted collateral asset.
 - `--private_key` (**required**): Private key for signing.
-- `--domain`: EIP712 domain as json, with the four fields of the `EIP712Domain`
-  type: `name`, `version`, `chainId`, `verifyingContract`. Omitted (or `null`)
-  fields fall back to the default domain for `--chain_id` (`rysk` / `0.0.0` /
-  `--chain_id` / the Rysk contract on that chain), so overriding one is enough:
 
-  ```bash
-  ./ryskV12 quote ... --domain '{"verifyingContract":"0x0ff34dd648b68f09b199b60b91442e750fd13fdc"}'
-  ```
+The EIP712 domain the quote is signed against defaults to `name: rysk`,
+`version: 0.0.0`, `chainId: --chain_id` and the Rysk contract on that chain.
+`chainId` always follows `--chain_id`. The other three can be overridden on
+their own; the flags below are optional and a flag left out keeps its default.
 
-  `chainId` accepts a number, a decimal string or a hex string. Any other field
-  (`salt` included) is rejected, as is an empty value for one of the four.
+- `--domain_name`: EIP712 domain name.
+- `--domain_version`: EIP712 domain version.
+- `--domain_verifying_contract`: EIP712 domain verifying contract.
+
+```bash
+./ryskV12 quote ... --domain_verifying_contract 0x0ff34dd648b68f09b199b60b91442e750fd13fdc
+```
 
 ---
 

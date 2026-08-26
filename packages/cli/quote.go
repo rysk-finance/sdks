@@ -77,8 +77,16 @@ var quoteAction = &cli.Command{
 			Usage:    "private key to sign messages with",
 		},
 		&cli.StringFlag{
-			Name:  "domain",
-			Usage: `optional EIP712 domain as json with fields name, version, chainId and verifyingContract, e.g. '{"verifyingContract":"0x..."}'. Fields left out fall back to the default domain for --chain_id`,
+			Name:  "domain_name",
+			Usage: "EIP712 domain name, defaults to rysk",
+		},
+		&cli.StringFlag{
+			Name:  "domain_version",
+			Usage: "EIP712 domain version, defaults to 0.0.0",
+		},
+		&cli.StringFlag{
+			Name:  "domain_verifying_contract",
+			Usage: "EIP712 domain verifying contract, defaults to the Rysk contract on --chain_id",
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -113,7 +121,11 @@ func quote(c *cli.Context) error {
 		CollateralAsset: c.String("collateral"),
 	}
 
-	domain, err := ParseTypedDataDomain(int64(q.ChainID), c.String("domain"))
+	domain, err := CreateTypedDataDomain(int64(q.ChainID), TypedDataDomainOverride{
+		Name:              c.String("domain_name"),
+		Version:           c.String("domain_version"),
+		VerifyingContract: c.String("domain_verifying_contract"),
+	})
 	if err != nil {
 		return err
 	}

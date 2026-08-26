@@ -23,37 +23,35 @@ func testQuote() Quote {
 	}
 }
 
-func TestParseTypedDataDomainDefaults(t *testing.T) {
+func TestCreateTypedDataDomainDefaults(t *testing.T) {
 	chainID := int64(CHAIN_ID_BASE_SEPOLIA)
 	want := ADDRESSES[CHAIN_ID_BASE_SEPOLIA].Rysk.String()
 
-	for _, raw := range []string{"", "   "} {
-		domain, err := ParseTypedDataDomain(chainID, raw)
-		if err != nil {
-			t.Fatalf("ParseTypedDataDomain(%q): %v", raw, err)
-		}
-		if domain.Name != "rysk" || domain.Version != "0.0.0" {
-			t.Errorf("got name %q version %q, want rysk/0.0.0", domain.Name, domain.Version)
-		}
-		if domain.VerifyingContract != want {
-			t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, want)
-		}
-		if domain.ChainId == nil || (*big.Int)(domain.ChainId).Int64() != chainID {
-			t.Errorf("got chainId %v, want %d", domain.ChainId, chainID)
-		}
-		if domain.Salt != "" {
-			t.Errorf("got salt %q, want empty", domain.Salt)
-		}
+	domain, err := CreateTypedDataDomain(chainID, TypedDataDomainOverride{})
+	if err != nil {
+		t.Fatalf("CreateTypedDataDomain: %v", err)
+	}
+	if domain.Name != "rysk" || domain.Version != "0.0.0" {
+		t.Errorf("got name %q version %q, want rysk/0.0.0", domain.Name, domain.Version)
+	}
+	if domain.VerifyingContract != want {
+		t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, want)
+	}
+	if domain.ChainId == nil || (*big.Int)(domain.ChainId).Int64() != chainID {
+		t.Errorf("got chainId %v, want %d", domain.ChainId, chainID)
+	}
+	if domain.Salt != "" {
+		t.Errorf("got salt %q, want empty", domain.Salt)
 	}
 }
 
-func TestParseTypedDataDomainOverrides(t *testing.T) {
+func TestCreateTypedDataDomainOverridesOneField(t *testing.T) {
 	chainID := int64(CHAIN_ID_BASE_SEPOLIA)
 	other := "0x2000000000000000000000000000000000000002"
 
-	domain, err := ParseTypedDataDomain(chainID, `{"verifyingContract":"`+other+`"}`)
+	domain, err := CreateTypedDataDomain(chainID, TypedDataDomainOverride{VerifyingContract: other})
 	if err != nil {
-		t.Fatalf("ParseTypedDataDomain: %v", err)
+		t.Fatalf("CreateTypedDataDomain: %v", err)
 	}
 	if domain.VerifyingContract != other {
 		t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, other)
@@ -62,47 +60,40 @@ func TestParseTypedDataDomainOverrides(t *testing.T) {
 	if domain.Name != "rysk" || domain.Version != "0.0.0" || domain.ChainId == nil {
 		t.Errorf("override clobbered defaults: %+v", domain)
 	}
+	if (*big.Int)(domain.ChainId).Int64() != chainID {
+		t.Errorf("got chainId %v, want %d", domain.ChainId, chainID)
+	}
 }
 
-func TestParseTypedDataDomainNullKeepsDefault(t *testing.T) {
-	domain, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), `{"chainId":null,"name":null}`)
+func TestCreateTypedDataDomainErrors(t *testing.T) {
+	cases := map[string]TypedDataDomainOverride{
+		"bad verifyingContract": {VerifyingContract: "0xnothex"},
+	}
+	for name, override := range cases {
+		if _, err := CreateTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), override); err == nil {
+			t.Errorf("%s: expected an error for %+v", name, override)
+		}
+	}
+}
+
+func TestCreateTypedDataDomainUnknownChain(t *testing.T) {
+	// A chain absent from ADDRESSES has no Rysk contract, so the default domain
+	// carries the zero address - which is what the domain flags are for.
+	domain, err := CreateTypedDataDomain(1234, TypedDataDomainOverride{})
 	if err != nil {
-		t.Fatalf("ParseTypedDataDomain: %v", err)
+		t.Fatalf("CreateTypedDataDomain: %v", err)
 	}
-	if domain.ChainId == nil || (*big.Int)(domain.ChainId).Int64() != int64(CHAIN_ID_BASE_SEPOLIA) {
-		t.Errorf("null chainId did not keep the default: %v", domain.ChainId)
+	if domain.VerifyingContract != ZeroAddress.String() {
+		t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, ZeroAddress.String())
 	}
-	if domain.Name != "rysk" {
-		t.Errorf("null name did not keep the default: %q", domain.Name)
-	}
-}
 
-func TestParseTypedDataDomainChainIdFormats(t *testing.T) {
-	for _, raw := range []string{`{"chainId":8453}`, `{"chainId":"8453"}`, `{"chainId":"0x2105"}`} {
-		domain, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), raw)
-		if err != nil {
-			t.Fatalf("ParseTypedDataDomain(%s): %v", raw, err)
-		}
-		if got, want := (*big.Int)(domain.ChainId).Int64(), int64(CHAIN_ID_BASE); got != want {
-			t.Errorf("%s: got chainId %d, want %d", raw, got, want)
-		}
+	other := "0x2000000000000000000000000000000000000002"
+	domain, err = CreateTypedDataDomain(1234, TypedDataDomainOverride{VerifyingContract: other})
+	if err != nil {
+		t.Fatalf("CreateTypedDataDomain: %v", err)
 	}
-}
-
-func TestParseTypedDataDomainErrors(t *testing.T) {
-	cases := map[string]string{
-		"malformed json":             `{"name":`,
-		"bad verifyingContract":      `{"verifyingContract":"0xnothex"}`,
-		"empty name":                 `{"name":""}`,
-		"empty version":              `{"version":""}`,
-		"empty verifyingContract":    `{"verifyingContract":""}`,
-		"salt is not a domain field": `{"salt":"0x0000000000000000000000000000000000000000000000000000000000000001"}`,
-		"unknown field":              `{"nope":1}`,
-	}
-	for name, raw := range cases {
-		if _, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), raw); err == nil {
-			t.Errorf("%s: expected an error for %s", name, raw)
-		}
+	if domain.VerifyingContract != other {
+		t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, other)
 	}
 }
 
@@ -113,12 +104,20 @@ func TestCreateQuoteMessageDomainAffectsHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default domain: %v", err)
 	}
-	if got := len(defaultData.Types["EIP712Domain"]); got != 4 {
-		t.Errorf("got %d default domain fields, want 4", got)
+
+	want := []string{"name", "version", "chainId", "verifyingContract"}
+	fields := defaultData.Types["EIP712Domain"]
+	if len(fields) != len(want) {
+		t.Fatalf("got %d domain fields, want %d", len(fields), len(want))
+	}
+	for i, name := range want {
+		if fields[i].Name != name {
+			t.Errorf("domain field %d is %q, want %q", i, fields[i].Name, name)
+		}
 	}
 
 	// An explicit domain equal to the default must not change the signed hash.
-	explicit, err := ParseTypedDataDomain(int64(q.ChainID), `{"name":"rysk"}`)
+	explicit, err := CreateTypedDataDomain(int64(q.ChainID), TypedDataDomainOverride{Name: "rysk", Version: "0.0.0"})
 	if err != nil {
 		t.Fatalf("explicit domain: %v", err)
 	}
@@ -130,49 +129,24 @@ func TestCreateQuoteMessageDomainAffectsHash(t *testing.T) {
 		t.Error("explicit default-equivalent domain changed the hash")
 	}
 
-	// A different verifyingContract must change it.
-	overridden, err := ParseTypedDataDomain(int64(q.ChainID), `{"verifyingContract":"0x2000000000000000000000000000000000000002"}`)
-	if err != nil {
-		t.Fatalf("overridden domain: %v", err)
+	// Each overridable field must change it.
+	overrides := map[string]TypedDataDomainOverride{
+		"name":              {Name: "custom"},
+		"version":           {Version: "1"},
+		"verifyingContract": {VerifyingContract: "0x2000000000000000000000000000000000000002"},
 	}
-	overriddenHash, _, err := CreateQuoteMessage(q, overridden)
-	if err != nil {
-		t.Fatalf("overridden domain: %v", err)
-	}
-	if string(overriddenHash) == string(defaultHash) {
-		t.Error("verifyingContract override did not change the hash")
-	}
-}
-
-func TestCreateQuoteMessageDomainFieldsAreFixed(t *testing.T) {
-	q := testQuote()
-
-	domain, err := ParseTypedDataDomain(int64(q.ChainID), `{"name":"custom","version":"1"}`)
-	if err != nil {
-		t.Fatalf("custom domain: %v", err)
-	}
-	customHash, customData, err := CreateQuoteMessage(q, domain)
-	if err != nil {
-		t.Fatalf("custom domain: %v", err)
-	}
-
-	want := []string{"name", "version", "chainId", "verifyingContract"}
-	fields := customData.Types["EIP712Domain"]
-	if len(fields) != len(want) {
-		t.Fatalf("got %d domain fields, want %d", len(fields), len(want))
-	}
-	for i, name := range want {
-		if fields[i].Name != name {
-			t.Errorf("domain field %d is %q, want %q", i, fields[i].Name, name)
+	for field, override := range overrides {
+		domain, err := CreateTypedDataDomain(int64(q.ChainID), override)
+		if err != nil {
+			t.Fatalf("%s override: %v", field, err)
 		}
-	}
-
-	defaultHash, _, err := CreateQuoteMessage(q, nil)
-	if err != nil {
-		t.Fatalf("default domain: %v", err)
-	}
-	if string(customHash) == string(defaultHash) {
-		t.Error("custom name/version did not change the hash")
+		hash, _, err := CreateQuoteMessage(q, domain)
+		if err != nil {
+			t.Fatalf("%s override: %v", field, err)
+		}
+		if string(hash) == string(defaultHash) {
+			t.Errorf("%s override did not change the hash", field)
+		}
 	}
 }
 
