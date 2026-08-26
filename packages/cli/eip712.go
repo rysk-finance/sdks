@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -13,25 +15,18 @@ import (
 
 var ZeroAddress = common.HexToAddress("0x0")
 
+// EIP712_DOMAIN_FIELDS lists every supported domain field with its type, in the
+// order EIP712 defines them. Only the fields a domain actually populates end up
+// in its EIP712Domain type, as the spec requires.
+var EIP712_DOMAIN_FIELDS = []apitypes.Type{
+	{Name: "name", Type: "string"},
+	{Name: "version", Type: "string"},
+	{Name: "chainId", Type: "uint256"},
+	{Name: "verifyingContract", Type: "address"},
+	{Name: "salt", Type: "bytes32"},
+}
+
 var EIP712_TYPES = &apitypes.Types{
-	"EIP712Domain": {
-		{
-			Name: "name",
-			Type: "string",
-		},
-		{
-			Name: "version",
-			Type: "string",
-		},
-		{
-			Name: "chainId",
-			Type: "uint256",
-		},
-		{
-			Name: "verifyingContract",
-			Type: "address",
-		},
-	},
 	"Quote": {
 		{
 			Name: "assetAddress",
@@ -161,22 +156,72 @@ func createEIP712Domain(chainId int64) *apitypes.TypedDataDomain {
 	}
 }
 
-func createEIP712TypedData(chainId int64, msgType string, msg map[string]interface{}) *apitypes.TypedData {
+// ParseTypedDataDomain layers a JSON EIP712 domain over the default domain for
+// chainId. Fields the JSON omits keep their default value, so a caller can
+// override just the verifyingContract; setting a field to "" (or chainId to
+// null) drops it from the domain entirely. An empty json string returns the
+// default domain unchanged.
+func ParseTypedDataDomain(chainId int64, raw string) (*apitypes.TypedDataDomain, error) {
+	domain := *createEIP712Domain(chainId)
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return &domain, nil
+	}
+
+	if err := json.Unmarshal([]byte(raw), &domain); err != nil {
+		return nil, fmt.Errorf("invalid domain json: %w", err)
+	}
+
+	if domain.VerifyingContract != "" && !common.IsHexAddress(domain.VerifyingContract) {
+		return nil, fmt.Errorf("invalid domain verifyingContract %q", domain.VerifyingContract)
+	}
+	if len(domain.Map()) == 0 {
+		return nil, errors.New("domain is undefined: every field was dropped")
+	}
+
+	return &domain, nil
+}
+
+// domainType returns the EIP712Domain type covering exactly the fields the
+// domain populates. Hashing a domain against a type that names absent fields
+// fails, and one that omits present fields silently ignores them.
+func domainType(domain *apitypes.TypedDataDomain) []apitypes.Type {
+	populated := domain.Map()
+	fields := make([]apitypes.Type, 0, len(EIP712_DOMAIN_FIELDS))
+	for _, field := range EIP712_DOMAIN_FIELDS {
+		if _, ok := populated[field.Name]; ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func createEIP712TypedData(domain *apitypes.TypedDataDomain, msgType string, msg map[string]interface{}) *apitypes.TypedData {
+	types := apitypes.Types{"EIP712Domain": domainType(domain)}
+	for name, fields := range *EIP712_TYPES {
+		types[name] = fields
+	}
 	return &apitypes.TypedData{
-		Types:       *EIP712_TYPES,
+		Types:       types,
 		PrimaryType: msgType,
-		Domain:      *createEIP712Domain(chainId),
+		Domain:      *domain,
 		Message:     msg,
 	}
 }
 
-func CreateQuoteMessage(q Quote) (messageHash []byte, typedData *apitypes.TypedData, err error) {
+// CreateQuoteMessage hashes q for signing. A nil domain uses the default domain
+// for the quote's chain.
+func CreateQuoteMessage(q Quote, domain *apitypes.TypedDataDomain) (messageHash []byte, typedData *apitypes.TypedData, err error) {
 	msg, _ := json.Marshal(q)
 	var imessage map[string]interface{}
 	json.Unmarshal(msg, &imessage)
 	// remove extra fields
 	delete(imessage, "signature")
-	typedData = createEIP712TypedData(int64(q.ChainID), "Quote", imessage)
+	if domain == nil {
+		domain = createEIP712Domain(int64(q.ChainID))
+	}
+	typedData = createEIP712TypedData(domain, "Quote", imessage)
 	hash, err := EncodeTypedData(typedData)
 	if err != nil {
 		return nil, typedData, err
@@ -191,7 +236,7 @@ func CreateTransferMessage(t Transfer) (messageHash []byte, typedData *apitypes.
 	json.Unmarshal(msg, &imessage)
 	// remove extra fields
 	delete(imessage, "signature")
-	typedData = createEIP712TypedData(int64(t.ChainID), "Transfer", imessage)
+	typedData = createEIP712TypedData(createEIP712Domain(int64(t.ChainID)), "Transfer", imessage)
 	hash, err := EncodeTypedData(typedData)
 	if err != nil {
 		return nil, typedData, err

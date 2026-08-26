@@ -76,6 +76,10 @@ var quoteAction = &cli.Command{
 			Required: true,
 			Usage:    "private key to sign messages with",
 		},
+		&cli.StringFlag{
+			Name:  "domain",
+			Usage: `optional EIP712 domain as json, e.g. '{"verifyingContract":"0x..."}'. Fields left out fall back to the default domain for --chain_id`,
+		},
 	},
 	Action: func(c *cli.Context) error {
 		return quote(c)
@@ -94,22 +98,27 @@ func quote(c *cli.Context) error {
 	}
 
 	q := Quote{
-		AssetAddress: c.String("asset"),
-		ChainID:      c.Int("chain_id"),
-		Expiry:       c.Int64("expiry"),
-		IsPut:        c.Bool("is_put"),
-		IsTakerBuy:   c.Bool("is_taker_buy"),
-		Maker:        c.String("maker"),
-		Nonce:        fmt.Sprintf("%d", c.Uint64("nonce")),
-		Price:        c.String("price"),
-		Quantity:     c.String("quantity"),
-		Strike:       c.String("strike"),
-		ValidUntil:   c.Int64("valid_until"),
-		USD:          c.String("usd"),
+		AssetAddress:    c.String("asset"),
+		ChainID:         c.Int("chain_id"),
+		Expiry:          c.Int64("expiry"),
+		IsPut:           c.Bool("is_put"),
+		IsTakerBuy:      c.Bool("is_taker_buy"),
+		Maker:           c.String("maker"),
+		Nonce:           fmt.Sprintf("%d", c.Uint64("nonce")),
+		Price:           c.String("price"),
+		Quantity:        c.String("quantity"),
+		Strike:          c.String("strike"),
+		ValidUntil:      c.Int64("valid_until"),
+		USD:             c.String("usd"),
 		CollateralAsset: c.String("collateral"),
 	}
 
-	msgHash, _, err := CreateQuoteMessage(q)
+	domain, err := ParseTypedDataDomain(int64(q.ChainID), c.String("domain"))
+	if err != nil {
+		return err
+	}
+
+	msgHash, _, err := CreateQuoteMessage(q, domain)
 	if err != nil {
 		return err
 	}

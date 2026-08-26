@@ -27,6 +27,8 @@ build/
 
 # Go / CLI build output
 packages/cli/ryskV12-*
+# `go build ./...` inside packages/cli emits a binary named after the dir
+/packages/cli/cli
 
 # CLI binaries dropped into the SDK packages by `make dev-bin`
 # (packages/py/ryskV12 is the python package itself, hence the exact names)
