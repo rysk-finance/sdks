@@ -144,6 +144,85 @@ follows `--chain_id`.
 
 ---
 
+### `premium`
+
+Maker actions against the premium RFQ api (`https://premium.rysk.finance`, override with `--url`).
+These are plain HTTP calls, so they need no `connect` and no channel: each subcommand does one
+request and prints the api's response on stdout as it came.
+
+```bash
+./ryskV12 premium requests --maker <0xmaker>
+./ryskV12 premium quotes --maker <0xmaker>
+./ryskV12 premium quote-status --id <quote_id>
+./ryskV12 premium quote --request_id <id> ... --domain_verifying_contract <0xoption_handler>
+./ryskV12 premium cancel --id <quote_id> --chain_id <chain_id> --nonce <nonce> --private_key <pk>
+```
+
+| Subcommand | Route |
+| --- | --- |
+| `requests` | `GET /api/requests/maker?address=` — the requests this maker may quote, each with the `typeDataDomain` to sign against |
+| `quotes` | `GET /api/quotes?address=` — this maker's live quotes, and the only place quote ids come from |
+| `quote-status` | `GET /api/quotes/{id}` — one quote, whatever its status |
+| `quote` | `POST /api/quotes` — sign and post one quote, or a batch |
+| `cancel` | `DELETE /api/quotes/{id}` — pull a quote, authenticated with EIP712 headers |
+
+#### `premium quote`
+
+Takes the option terms as flags, exactly as the request carried them: `--request_id`, `--asset`,
+`--chain_id`, `--expiry`, `--is_put`, `--is_taker_buy`, `--strike`, `--quantity`, `--usd`,
+`--collateral`, plus your own `--maker`, `--nonce`, `--price`, `--valid_until` and `--private_key`.
+
+Only `requestId`, `maker`, `price`, `nonce`, `validUntil` and `signature` are sent — the api rebuilds
+the signed terms from the stored request, so a term that does not match it just yields a signature
+that will not verify.
+
+The domain is the pool's option handler, not the Rysk contract the websocket `quote` command uses:
+
+- `--domain_verifying_contract` (**required**): the request's `typeDataDomain.verifyingContract`.
+- `--domain_name`: defaults to `PremiumOptionHandler`.
+- `--domain_version`: defaults to `1`.
+
+`--valid_until` is unix **seconds** and has to sit strictly between now+2min and now+10min — the api
+rejects anything else, and the command checks it before signing. Request `validUntil` values are
+milliseconds; passing one here is rejected as such.
+
+Batch a whole strip into one call with `--batch <file>` (or `--batch -` for stdin), a json array of
+quotes. Each entry is a quote plus `requestId` and `domain`; `--batch` cannot be combined with the
+per quote flags, and one invalid entry fails the command before anything is posted:
+
+```json
+[
+  {
+    "requestId": "b7c2-uuid",
+    "assetAddress": "0x...",
+    "chainId": 84532,
+    "expiry": 1767225600,
+    "isPut": true,
+    "isTakerBuy": false,
+    "strike": "300000000000",
+    "quantity": "1000000000000000000",
+    "usd": "0x...",
+    "collateralAsset": "0x...",
+    "maker": "0x...",
+    "nonce": "42",
+    "price": "1250000000000000000",
+    "validUntil": 1767139500,
+    "domain": { "verifyingContract": "0x..." }
+  }
+]
+```
+
+Posting quotes always answers `200`, with rejections in a `failures` array. The command prints the
+response either way and exits non zero when `failures` is not empty, so a rejected quote cannot be
+mistaken for a stored one. An empty response body is treated as a failure too — the api recovers
+panics without writing a status.
+
+#### Nonces
+
+`nonce` is a decimal uint64 and is spent once, whatever it was used for: quote nonces and the
+`cancel` auth nonce share one keyspace per address. Draw them from a single persisted counter per
+signing key — the CLI holds no state between invocations.
+
 ### `transfer`
 
 Requests a transfer (deposit or withdrawal) through the WebSocket.

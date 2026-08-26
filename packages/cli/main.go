@@ -19,6 +19,7 @@ func main() {
 			connectAction,
 			disconnectAction,
 			positionsAction,
+			premiumAction,
 			quoteAction,
 			transferAction,
 			versionAction,
