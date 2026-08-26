@@ -135,6 +135,51 @@ const proc = ryskSDK.execute(
 always comes from the quote, so a domain for another chain - or one carrying a
 `salt` - is rejected instead of being signed against the wrong domain.
 
+### Premium RFQ (maker)
+
+The premium RFQ api is plain HTTP, so these need no connection and no channel: each one runs the CLI
+once and prints the api's response on stdout. `url` is optional — leave it out for production, pass
+it for a local or staging api.
+
+```ts
+// requests this maker may quote, each with the domain to sign against
+const requests = ryskSDK.execute(ryskSDK.premiumRequestsArgs(maker));
+
+// sign and post one quote for a request
+const quote: Quote = {
+  ...quoteDetails,
+  maker,
+  nonce: "42",                              // decimal uint64, one counter per key
+  price: "1250000000000000000",             // 1e18
+  validUntil: Math.floor(Date.now() / 1000) + 300, // SECONDS, now+2min .. now+10min
+  domain: request.typeDataDomain,           // the pool's option handler
+};
+const proc = ryskSDK.execute(ryskSDK.premiumQuoteArgs(request.id, quote));
+
+// a whole strip in one api call
+writeFileSync("batch.json", ryskSDK.premiumQuoteBatch([
+  { requestId: request.id, quote: quoteA },
+  { requestId: request.id, quote: quoteB },
+]));
+ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
+
+// your live quotes (the only source of quote ids), one quote, and a cancel
+ryskSDK.execute(ryskSDK.premiumQuotesArgs(maker));
+ryskSDK.execute(ryskSDK.premiumQuoteStatusArgs(quoteId));
+ryskSDK.execute(ryskSDK.premiumCancelArgs(quoteId, chainId, "43"));
+```
+
+Terms have to be the request's — the api rebuilds the signed message from the stored request, so an
+altered term just yields a signature that will not verify. `domain` needs `verifyingContract` (the
+CLI defaults name and version); a domain with a `salt` or another chain's `chainId` throws here
+rather than being signed.
+
+Posting quotes always answers `200`, with rejections in a `failures` array. The CLI prints the
+response and exits non zero when that array is not empty, so check the exit code, not the status.
+
+Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
+single persisted counter.
+
 ## Example
 
 Check out the `examples` folder.

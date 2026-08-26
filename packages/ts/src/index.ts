@@ -116,7 +116,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "3.1.0";
+  private _minSdkVersion: string = "3.2.0";
 
   constructor(env: Env, privateKey: string, v12CliPath: string = "./ryskV12") {
     this._env = env;
@@ -244,6 +244,175 @@ class Rysk {
       domain.version!,
       "--domain_verifying_contract",
       domain.verifyingContract!,
+    ];
+  }
+
+  /**
+   * Base url of the premium rfq api. Left out of the args when not given, so the
+   * CLI's own default (production) applies; pass it for a local or staging api.
+   */
+  private _premiumURLArgs(url?: string): Array<string> {
+    return url ? ["--url", url] : [];
+  }
+
+  /**
+   * The premium api signs against the pool's option handler, which arrives on
+   * the request as `typeDataDomain`. Only the verifying contract is required -
+   * the CLI defaults the name and version - but a domain it cannot sign is
+   * rejected here rather than passed on.
+   */
+  private _premiumDomainArgs(quote: Quote): Array<string> {
+    const domain = quote.domain;
+    if (!domain?.verifyingContract) {
+      throw new Error(
+        "premium quote domain: missing verifyingContract, pass the request's typeDataDomain",
+      );
+    }
+    if (domain.salt) {
+      throw new Error("premium quote domain: salt is not supported");
+    }
+    if (domain.chainId !== undefined && domain.chainId !== null) {
+      if (Number(domain.chainId) !== quote.chainId) {
+        throw new Error(
+          `premium quote domain: chainId ${domain.chainId} does not match the quote's chain ${quote.chainId}`,
+        );
+      }
+    }
+
+    return [
+      ...(domain.name ? ["--domain_name", domain.name] : []),
+      ...(domain.version ? ["--domain_version", domain.version] : []),
+      "--domain_verifying_contract",
+      domain.verifyingContract,
+    ];
+  }
+
+  /** Requests this maker may quote, each carrying the domain to sign against. */
+  public premiumRequestsArgs(maker: string, url?: string) {
+    return [
+      "premium",
+      "requests",
+      "--maker",
+      maker,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** This maker's live quotes - the only place quote ids come from. */
+  public premiumQuotesArgs(maker: string, url?: string) {
+    return [
+      "premium",
+      "quotes",
+      "--maker",
+      maker,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /** One quote by id, whatever its status. */
+  public premiumQuoteStatusArgs(id: string, url?: string) {
+    return [
+      "premium",
+      "quote-status",
+      "--id",
+      id,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /**
+   * Signs and posts one quote. The terms have to be the request's - the api
+   * rebuilds the signed message from the stored request - and `validUntil` is in
+   * seconds, strictly between now+2min and now+10min.
+   */
+  public premiumQuoteArgs(requestId: string, quote: Quote, url?: string) {
+    return [
+      "premium",
+      "quote",
+      "--request_id",
+      requestId,
+      "--asset",
+      quote.assetAddress,
+      "--chain_id",
+      quote.chainId.toString(),
+      "--expiry",
+      quote.expiry.toString(),
+      "--strike",
+      quote.strike,
+      "--quantity",
+      quote.quantity,
+      "--usd",
+      quote.usd,
+      "--collateral",
+      quote.collateralAsset,
+      "--maker",
+      quote.maker,
+      "--nonce",
+      quote.nonce,
+      "--price",
+      quote.price,
+      "--valid_until",
+      quote.validUntil.toString(),
+      "--private_key",
+      this._private_key,
+      ...this._premiumDomainArgs(quote),
+      ...this._premiumURLArgs(url),
+      quote.isPut ? "--is_put" : "",
+      quote.isTakerBuy ? "--is_taker_buy" : "",
+    ];
+  }
+
+  /**
+   * Posts a batch of quotes in one call, reading them from `source` - a file
+   * path, or "-" for stdin. Build the file with `premiumQuoteBatch`.
+   */
+  public premiumQuoteBatchArgs(source: string, url?: string) {
+    return [
+      "premium",
+      "quote",
+      "--batch",
+      source,
+      "--private_key",
+      this._private_key,
+      ...this._premiumURLArgs(url),
+    ];
+  }
+
+  /**
+   * Serialises quotes into the json array `premiumQuoteBatchArgs` reads, failing
+   * on a domain the CLI could not sign before anything is written.
+   */
+  public premiumQuoteBatch(quotes: Array<{ requestId: string; quote: Quote }>) {
+    return JSON.stringify(
+      quotes.map(({ requestId, quote }) => {
+        this._premiumDomainArgs(quote);
+        return { ...quote, requestId };
+      }),
+    );
+  }
+
+  /**
+   * Pulls one of this maker's quotes. The nonce is spent once and shares its
+   * keyspace with quote nonces, so draw it from the same counter.
+   */
+  public premiumCancelArgs(
+    id: string,
+    chainId: number,
+    nonce: string,
+    url?: string,
+  ) {
+    return [
+      "premium",
+      "cancel",
+      "--id",
+      id,
+      "--chain_id",
+      chainId.toString(),
+      "--nonce",
+      nonce,
+      "--private_key",
+      this._private_key,
+      ...this._premiumURLArgs(url),
     ];
   }
 

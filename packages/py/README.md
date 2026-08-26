@@ -117,6 +117,51 @@ proc = rysk_sdk.execute(rysk_sdk.quote_args(maker_channel, request_id, quote_det
 always comes from the quote, so a domain for another chain - or one carrying a
 `salt` - raises instead of being signed against the wrong domain.
 
+### Premium RFQ (maker)
+
+The premium RFQ api is plain HTTP, so these need no connection and no channel: each one runs the CLI
+once and prints the api's response on stdout. `url` is optional — leave it out for production, pass
+it for a local or staging api.
+
+```python
+from dataclasses import replace
+
+# requests this maker may quote, each with the domain to sign against
+proc = rysk_sdk.execute(rysk_sdk.premium_requests_args(maker))
+
+# sign and post one quote for a request
+quote = replace(
+    quote_details,
+    maker=maker,
+    nonce="42",                          # decimal uint64, one counter per key
+    price="1250000000000000000",         # 1e18
+    validUntil=int(time.time()) + 300,   # SECONDS, now+2min .. now+10min
+    domain=request.typeDataDomain,       # the pool's option handler
+)
+proc = rysk_sdk.execute(rysk_sdk.premium_quote_args(request.id, quote))
+
+# a whole strip in one api call
+with open("batch.json", "w") as f:
+    f.write(rysk_sdk.premium_quote_batch([(request.id, quote_a), (request.id, quote_b)]))
+rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
+
+# your live quotes (the only source of quote ids), one quote, and a cancel
+rysk_sdk.execute(rysk_sdk.premium_quotes_args(maker))
+rysk_sdk.execute(rysk_sdk.premium_quote_status_args(quote_id))
+rysk_sdk.execute(rysk_sdk.premium_cancel_args(quote_id, chain_id, "43"))
+```
+
+Terms have to be the request's — the api rebuilds the signed message from the stored request, so an
+altered term just yields a signature that will not verify. `domain` needs `verifyingContract` (the
+CLI defaults name and version); a domain with a `salt` or another chain's `chainId` raises here
+rather than being signed.
+
+Posting quotes always answers `200`, with rejections in a `failures` array. The CLI prints the
+response and exits non zero when that array is not empty, so check the return code, not the status.
+
+Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
+single persisted counter.
+
 ## Example
 
 ```python

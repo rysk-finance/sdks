@@ -1,11 +1,12 @@
 import asyncio
 from asyncio import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from os import path
 from subprocess import PIPE, Popen
 import sys
-from typing import List
+import json
+from typing import List, Optional, Tuple
 
 from .models import Quote, Transfer
 
@@ -32,7 +33,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "3.1.0"
+    _min_sdk_version: str = "3.2.0"
 
     def __init__(
         self,
@@ -188,6 +189,135 @@ class Rysk:
 
     def positions_args(self, channel_id: str, account: str):
         return ["positions", "--channel_id", channel_id, "--account", account]
+
+    def _premium_url_args(self, url: Optional[str]) -> List[str]:
+        """Base url of the premium rfq api. Left out of the args when not given,
+        so the CLI's own default (production) applies; pass it for a local or
+        staging api."""
+        return ["--url", url] if url else []
+
+    def _premium_domain_args(self, quote: Quote) -> List[str]:
+        """The premium api signs against the pool's option handler, which arrives
+        on the request as typeDataDomain. Only the verifying contract is required
+        - the CLI defaults the name and version - but a domain it cannot sign is
+        rejected here rather than passed on."""
+        domain = quote.domain
+        if domain is None or not domain.verifyingContract:
+            raise ValueError(
+                "premium quote domain: missing verifyingContract, pass the request's typeDataDomain"
+            )
+        if domain.salt:
+            raise ValueError("premium quote domain: salt is not supported")
+        if domain.chainId is not None and int(str(domain.chainId), 0) != quote.chainId:
+            raise ValueError(
+                f"premium quote domain: chainId {domain.chainId} does not match the quote's chain {quote.chainId}"
+            )
+
+        args: List[str] = []
+        if domain.name:
+            args.extend(["--domain_name", domain.name])
+        if domain.version:
+            args.extend(["--domain_version", domain.version])
+        args.extend(["--domain_verifying_contract", domain.verifyingContract])
+        return args
+
+    def premium_requests_args(self, maker: str, url: Optional[str] = None):
+        """Requests this maker may quote, each carrying the domain to sign against."""
+        return ["premium", "requests", "--maker", maker, *self._premium_url_args(url)]
+
+    def premium_quotes_args(self, maker: str, url: Optional[str] = None):
+        """This maker's live quotes - the only place quote ids come from."""
+        return ["premium", "quotes", "--maker", maker, *self._premium_url_args(url)]
+
+    def premium_quote_status_args(self, id: str, url: Optional[str] = None):
+        """One quote by id, whatever its status."""
+        return ["premium", "quote-status", "--id", id, *self._premium_url_args(url)]
+
+    def premium_quote_args(self, request_id: str, quote: Quote, url: Optional[str] = None):
+        """Signs and posts one quote. The terms have to be the request's - the api
+        rebuilds the signed message from the stored request - and validUntil is in
+        seconds, strictly between now+2min and now+10min."""
+        base = [
+            "premium",
+            "quote",
+            "--request_id",
+            request_id,
+            "--asset",
+            quote.assetAddress,
+            "--chain_id",
+            str(quote.chainId),
+            "--expiry",
+            str(quote.expiry),
+            "--strike",
+            quote.strike,
+            "--quantity",
+            quote.quantity,
+            "--usd",
+            quote.usd,
+            "--collateral",
+            quote.collateralAsset,
+            "--maker",
+            quote.maker,
+            "--nonce",
+            quote.nonce,
+            "--price",
+            quote.price,
+            "--valid_until",
+            str(quote.validUntil),
+            "--private_key",
+            self._private_key,
+            *self._premium_domain_args(quote),
+            *self._premium_url_args(url),
+        ]
+        if quote.isPut:
+            base.append("--is_put")
+        if quote.isTakerBuy:
+            base.append("--is_taker_buy")
+        return base
+
+    def premium_quote_batch_args(self, source: str, url: Optional[str] = None):
+        """Posts a batch of quotes in one call, reading them from source - a file
+        path, or "-" for stdin. Build the file with premium_quote_batch."""
+        return [
+            "premium",
+            "quote",
+            "--batch",
+            source,
+            "--private_key",
+            self._private_key,
+            *self._premium_url_args(url),
+        ]
+
+    def premium_quote_batch(self, quotes: List[Tuple[str, Quote]]) -> str:
+        """Serialises (request id, quote) pairs into the json array
+        premium_quote_batch_args reads, failing on a domain the CLI could not sign
+        before anything is written."""
+        entries = []
+        for request_id, quote in quotes:
+            self._premium_domain_args(quote)
+            entry = asdict(quote)
+            entry["requestId"] = request_id
+            entries.append({k: v for k, v in entry.items() if v is not None})
+        return json.dumps(entries)
+
+    def premium_cancel_args(
+        self, id: str, chain_id: int, nonce: str, url: Optional[str] = None
+    ):
+        """Pulls one of this maker's quotes. The nonce is spent once and shares its
+        keyspace with quote nonces, so draw it from the same counter."""
+        return [
+            "premium",
+            "cancel",
+            "--id",
+            id,
+            "--chain_id",
+            str(chain_id),
+            "--nonce",
+            nonce,
+            "--private_key",
+            self._private_key,
+            *self._premium_url_args(url),
+        ]
 
     def quote_args(self, channel_id: str, rfq_id: str, quote: Quote):
         base = [
