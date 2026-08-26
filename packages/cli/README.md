@@ -24,6 +24,18 @@ This CLI allows you to connect to a WebSocket server, send signed messages for a
     ```
     This will create an executable file named `ryskV12` in the current directory.
 
+    `./build.sh` cross compiles the release set - linux/amd64, linux/arm64,
+    darwin/amd64, darwin/arm64 - from any of those hosts, since the CLI needs no
+    cgo. It pins `CGO_ENABLED=0` so every binary is statically linked and runs on
+    any distro, glibc or musl.
+
+    The macOS binaries are not signed or notarized. A `curl` download (what the
+    SDKs do) is not quarantined, but one saved by a browser is, and macOS will
+    refuse it until you clear the flag:
+    ```bash
+    xattr -d com.apple.quarantine ryskV12
+    ```
+
 ## Environment
 
 | Variable | Used by | Purpose |

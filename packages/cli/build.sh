@@ -21,7 +21,15 @@ for platform in "${platforms[@]}"; do
   fi
 
   echo "Building for $os/$arch..."
-  GOOS="$os" GOARCH="$arch" go build -ldflags="-X 'main.Version=${VERSION}'" -o "$output"
+  # CGO_ENABLED=0 for every target, not just the cross compiled ones: a native
+  # build defaults to cgo, which links the host's libc through net's resolver and
+  # produces a binary that will not run on a different distro. Cross compilation
+  # turns cgo off on its own, which is why only the host target came out dynamic.
+  # -trimpath keeps build paths out of the binary.
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+    -trimpath \
+    -ldflags="-X 'main.Version=${VERSION}'" \
+    -o "$output"
   if [ $? -ne 0 ]; then
     echo "Failed to build for $os/$arch"
     exit 1
