@@ -1,8 +1,8 @@
 import asyncio
-from asyncio import subprocess
 from dataclasses import asdict, dataclass
 from enum import Enum
 from os import path
+import subprocess
 from subprocess import PIPE, Popen
 import sys
 import json
@@ -77,7 +77,7 @@ class Rysk:
 
     
     def _sdk_version_check(self):
-        def _trigger_error(self):
+        def _trigger_error():
             print(
                 f"{self._cli_path} version too low: min {self._min_sdk_version}.\n"
                 "Download it here https://github.com/rysk-finance/ryskV12/releases.",

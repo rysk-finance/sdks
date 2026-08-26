@@ -1,79 +1,170 @@
+"""Market maker loop for the websocket flow: hold a maker connection open, listen
+for RFQs on an asset, price them, and send signed quotes back through the maker
+channel.
+
+    RYSK_SDK_PK=<hex private key> \
+    RYSK_MAKER=0x<maker address> \
+    RYSK_ASSET=0x<asset address> \
+    python tests/run_example.py
+"""
+
 import asyncio
 import json
 import os
 import signal
 import sys
 import time
-from ryskV12.models import Quote, Request, is_json_rpc_response, is_request
-from ryskV12.client import Rysk, Env
 
-private_key = ""
-public_address = "0x50DdD5c84387a3B7836fAE45A4AD7499Bb10Bb24"
-asset = "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f"
+from ryskV12.client import Env, Rysk
+from ryskV12.models import (
+    Quote,
+    Request,
+    is_json_rpc_response,
+    is_quote_notification,
+    is_request,
+)
 
-def price_it(public_address: str, req: Request) -> Quote:
-    # ...your magic goes here
-    price = 4
+PK = os.environ.get("RYSK_SDK_PK", "")
+MAKER = os.environ.get("RYSK_MAKER", "")
+ASSET = os.environ.get("RYSK_ASSET", "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f")
+
+MAKER_CHANNEL = "maker__py"
+RFQ_CHANNEL = f"{ASSET}__py"
+QUOTE_VALIDITY_SECONDS = 30
+NONCE_FILE = ".rysk-nonce"
+
+rysk_sdk = Rysk(env=Env.TESTNET, private_key=PK, v12_cli_path="./ryskV12cli")
+
+
+def next_nonce() -> str:
+    """Nonces are spent once per address, so they come from a single counter that
+    survives a restart - one that rewinds starts failing every write."""
+    counter = int(time.time() * 1000)
+    try:
+        with open(NONCE_FILE) as f:
+            counter = max(counter, int(f.read()) + 1)
+    except (FileNotFoundError, ValueError):
+        pass  # first run, start from the clock
+    with open(NONCE_FILE, "w") as f:
+        f.write(str(counter))
+    return str(counter)
+
+
+def price_request(request: Request) -> str:
+    """Replace with your own pricing. Quantity and strike come from the request."""
+    mid = 4 * 10**18
+    edge = 110 if request.isTakerBuy else 90  # sell above, buy below
+    return str(mid * edge // 100)
+
+
+def build_quote(request: Request) -> Quote:
+    """The terms have to be the request's - they are what the taker asked for and
+    what the signature commits to. Ours are the maker's own fields."""
     return Quote(
-        assetAddress=req.asset,
-        chainId=req.chainId,
-        expiry=req.expiry,
-        isPut=req.isPut,
-        isTakerBuy=False,
-        maker=public_address,
-        nonce=str(int(time.time() * 1000)),
-        price=f"{price}000000000000000000",
-        quantity=req.quantity,
-        strike=req.strike,
-        validUntil=int(time.time()) + 30,
-        usd=req.usd,
-        collateralAsset=req.collateralAsset,
-        premiumAsset=req.premiumAsset,
-        domain=req.typeDataDomain,
+        assetAddress=request.asset,
+        chainId=request.chainId,
+        expiry=request.expiry,
+        isPut=request.isPut,
+        isTakerBuy=bool(request.isTakerBuy),
+        quantity=request.quantity,
+        strike=request.strike,
+        usd=request.usd,
+        collateralAsset=request.collateralAsset,
+        maker=MAKER,
+        nonce=next_nonce(),
+        price=price_request(request),
+        validUntil=int(time.time()) + QUOTE_VALIDITY_SECONDS,
+        # sent with the quote but not signed; present when the request names one
+        premiumAsset=request.premiumAsset,
+        # sign against the domain the request asks for, if it asks for one
+        domain=request.typeDataDomain,
     )
 
 
-async def process_rfqs():
-    rysk_sdk = Rysk(env=Env.TESTNET, private_key=private_key, v12_cli_path="./ryskV12cli")
-    maker_chan = "maker__py"
-    rfq_chan = f'{asset}__py'
+def quote(request_id: str, request: Request) -> None:
+    proc = rysk_sdk.execute(rysk_sdk.quote_args(MAKER_CHANNEL, request_id, build_quote(request)))
+    stdout, stderr = proc.communicate()
+    if stdout.strip():
+        print("quote:", stdout.strip())
+    if stderr.strip():
+        print("quote error:", stderr.strip())
+
+
+def handle_maker_message(payload: bytes) -> None:
+    text = payload.decode().strip()
+    if not text:
+        return
     try:
-        asyncio.create_task(rysk_sdk.execute_async(rysk_sdk.connect_args(maker_chan, "maker")))
+        message = json.loads(text)
+    except json.JSONDecodeError:
+        print("maker:", text)
+        return
 
-        def process_rfq(payload: bytes):
-            # payload = str(payload)
-            if payload == b'\n':
-                return
-            print(str(payload))
-            try:
-                data = json.loads(payload)
-                if is_json_rpc_response(data):
-                    request_id = data["id"]
-                    result = data["result"]
-                    if is_request(result):
-                        quote = price_it(public_address, Request.from_json(json.dumps(result)))
-                        cmd = rysk_sdk.quote_args(maker_chan, request_id, quote)
-                        proc = rysk_sdk.execute(cmd)
-                        print(proc.stdout.readlines())
-                        print(proc.stderr.readlines())
+    # A quote notification tells you where your price stands, so it is the cue to
+    # re-quote rather than wait.
+    if is_json_rpc_response(message) and is_quote_notification(message.get("result")):
+        result = message["result"]
+        print(f"rfq {result['rfqId']}: best {result['newBest']}, yours {result['yours']}")
+        return
+    print("maker:", text)
 
-            except Exception as e:
-                print("error")
-                print(e)
 
-        await rysk_sdk.execute_async(rysk_sdk.connect_args(rfq_chan, f"rfqs/{asset}"), process_rfq)
+def handle_rfq_message(payload: bytes) -> None:
+    text = payload.decode().strip()
+    if not text:
+        return
+    try:
+        message = json.loads(text)
+        if not is_json_rpc_response(message) or not is_request(message.get("result")):
+            return
+        request = Request.from_json(json.dumps(message["result"]))
+        print(f"rfq {message['id']}: {request.quantity} @ {request.strike}")
+        quote(message["id"], request)
+    except Exception as e:
+        print("failed to handle rfq:", e)
+
+
+async def process_rfqs() -> None:
+    try:
+        # The maker connection is what quotes and transfers are written into; it
+        # has to stay open for the whole session.
+        asyncio.create_task(
+            rysk_sdk.execute_async(
+                rysk_sdk.connect_args(MAKER_CHANNEL, "maker"), handle_maker_message
+            )
+        )
+        await asyncio.sleep(1)  # let the maker socket come up before quoting
+
+        # Account reads go through the maker channel like everything else.
+        rysk_sdk.execute(rysk_sdk.balances_args(MAKER_CHANNEL, MAKER))
+        rysk_sdk.execute(rysk_sdk.positions_args(MAKER_CHANNEL, MAKER))
+
+        print(f"listening for rfqs on {ASSET}")
+        await rysk_sdk.execute_async(
+            rysk_sdk.connect_args(RFQ_CHANNEL, f"rfqs/{ASSET}"), handle_rfq_message
+        )
     except Exception as e:
         print(e)
     finally:
-        rysk_sdk.execute(rysk_sdk.disconnect_args(maker_chan))
-        rysk_sdk.execute(rysk_sdk.disconnect_args(rfq_chan))
+        rysk_sdk.execute(rysk_sdk.disconnect_args(RFQ_CHANNEL))
+        rysk_sdk.execute(rysk_sdk.disconnect_args(MAKER_CHANNEL))
+
 
 def handle_sig(sig, frame):
-    os.remove(f"/tmp/{asset}__py.sock")
-    os.remove("/tmp/maker__py.sock")
+    print("\ndisconnecting")
+    rysk_sdk.execute(rysk_sdk.disconnect_args(RFQ_CHANNEL))
+    rysk_sdk.execute(rysk_sdk.disconnect_args(MAKER_CHANNEL))
+    for channel in (RFQ_CHANNEL, MAKER_CHANNEL):
+        try:
+            os.remove(f"/tmp/{channel}.sock")
+        except FileNotFoundError:
+            pass
     sys.exit(0)
 
 
 if __name__ == "__main__":
+    if not PK or not MAKER:
+        print("set RYSK_SDK_PK and RYSK_MAKER", file=sys.stderr)
+        sys.exit(1)
     signal.signal(signal.SIGINT, handle_sig)
     asyncio.run(process_rfqs())
