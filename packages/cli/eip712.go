@@ -2,8 +2,9 @@ package main
 
 import (
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -162,43 +163,51 @@ func createEIP712Domain(chainId int64) *apitypes.TypedDataDomain {
 	}
 }
 
-// TypedDataDomainOverride carries the optional per-field overrides for the
-// EIP712 domain. An empty field means "not set" and keeps the default. The
-// domain's chainId is always the chain the message is for, so it is not
-// overridable.
+// TypedDataDomainOverride carries the overrides for the EIP712 domain. It is
+// all or nothing: either every field is set and the domain is taken from it, or
+// none are and the default domain for the chain is used. The domain's chainId is
+// always the chain the message is for, so it is not overridable.
 type TypedDataDomainOverride struct {
 	Name              string
 	Version           string
 	VerifyingContract string
 }
 
-// CreateTypedDataDomain layers override onto the default domain for chainId.
-// The domain has exactly the four fields of the EIP712Domain type - name,
-// version, chainId and verifyingContract - and each one must end up set.
+// CreateTypedDataDomain builds the EIP712 domain for chainId, from override if
+// it is set. A partial override is an error: signing against a domain that is
+// half default and half caller-supplied is never what the caller meant.
 func CreateTypedDataDomain(chainId int64, override TypedDataDomainOverride) (*apitypes.TypedDataDomain, error) {
-	domain := *createEIP712Domain(chainId)
-
-	if override.Name != "" {
-		domain.Name = override.Name
-	}
-	if override.Version != "" {
-		domain.Version = override.Version
-	}
-	if override.VerifyingContract != "" {
-		domain.VerifyingContract = override.VerifyingContract
+	set := map[string]bool{
+		"name":               override.Name != "",
+		"version":            override.Version != "",
+		"verifying contract": override.VerifyingContract != "",
 	}
 
-	if domain.Name == "" {
-		return nil, errors.New("domain name is empty")
+	missing := []string{}
+	for field, ok := range set {
+		if !ok {
+			missing = append(missing, field)
+		}
 	}
-	if domain.Version == "" {
-		return nil, errors.New("domain version is empty")
+	sort.Strings(missing)
+
+	if len(missing) == len(set) {
+		return createEIP712Domain(chainId), nil
 	}
-	if !common.IsHexAddress(domain.VerifyingContract) {
-		return nil, fmt.Errorf("invalid domain verifying contract %q", domain.VerifyingContract)
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("domain is incomplete: also provide the domain %s", strings.Join(missing, " and "))
 	}
 
-	return &domain, nil
+	if !common.IsHexAddress(override.VerifyingContract) {
+		return nil, fmt.Errorf("invalid domain verifying contract %q", override.VerifyingContract)
+	}
+
+	return &apitypes.TypedDataDomain{
+		Name:              override.Name,
+		Version:           override.Version,
+		ChainId:           math.NewHexOrDecimal256(chainId),
+		VerifyingContract: override.VerifyingContract,
+	}, nil
 }
 
 func createEIP712TypedData(domain *apitypes.TypedDataDomain, msgType string, msg map[string]interface{}) *apitypes.TypedData {
@@ -216,8 +225,9 @@ func CreateQuoteMessage(q Quote, domain *apitypes.TypedDataDomain) (messageHash 
 	msg, _ := json.Marshal(q)
 	var imessage map[string]interface{}
 	json.Unmarshal(msg, &imessage)
-	// remove extra fields
+	// remove fields that are not part of the signed Quote type
 	delete(imessage, "signature")
+	delete(imessage, "premiumAsset")
 	if domain == nil {
 		domain = createEIP712Domain(int64(q.ChainID))
 	}

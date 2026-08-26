@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/urfave/cli/v2"
 )
 
@@ -77,16 +78,20 @@ var quoteAction = &cli.Command{
 			Usage:    "private key to sign messages with",
 		},
 		&cli.StringFlag{
+			Name:  "premium_asset",
+			Usage: "asset the premium is paid in, omitted from the quote when not set",
+		},
+		&cli.StringFlag{
 			Name:  "domain_name",
-			Usage: "EIP712 domain name, defaults to rysk",
+			Usage: "EIP712 domain name, required with the other domain flags",
 		},
 		&cli.StringFlag{
 			Name:  "domain_version",
-			Usage: "EIP712 domain version, defaults to 0.0.0",
+			Usage: "EIP712 domain version, required with the other domain flags",
 		},
 		&cli.StringFlag{
 			Name:  "domain_verifying_contract",
-			Usage: "EIP712 domain verifying contract, defaults to the Rysk contract on --chain_id",
+			Usage: "EIP712 domain verifying contract, required with the other domain flags",
 		},
 	},
 	Action: func(c *cli.Context) error {
@@ -119,6 +124,11 @@ func quote(c *cli.Context) error {
 		ValidUntil:      c.Int64("valid_until"),
 		USD:             c.String("usd"),
 		CollateralAsset: c.String("collateral"),
+		PremiumAsset:    c.String("premium_asset"),
+	}
+
+	if q.PremiumAsset != "" && !common.IsHexAddress(q.PremiumAsset) {
+		return fmt.Errorf("invalid premium asset %q", q.PremiumAsset)
 	}
 
 	domain, err := CreateTypedDataDomain(int64(q.ChainID), TypedDataDomainOverride{

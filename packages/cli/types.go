@@ -25,6 +25,9 @@ type Quote struct {
 	ValidUntil      int64  `json:"validUntil"`
 	USD             string `json:"usd"`
 	CollateralAsset string `json:"collateralAsset"`
+	// PremiumAsset is not part of the signed Quote type, so it is dropped
+	// before hashing in CreateQuoteMessage.
+	PremiumAsset string `json:"premiumAsset,omitempty"`
 }
 
 type QuoteNotification struct {

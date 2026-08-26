@@ -2,7 +2,10 @@ package main
 
 import (
 	"math/big"
+	"strings"
 	"testing"
+
+	"github.com/goccy/go-json"
 )
 
 func testQuote() Quote {
@@ -45,29 +48,47 @@ func TestCreateTypedDataDomainDefaults(t *testing.T) {
 	}
 }
 
-func TestCreateTypedDataDomainOverridesOneField(t *testing.T) {
+func TestCreateTypedDataDomainFullOverride(t *testing.T) {
 	chainID := int64(CHAIN_ID_BASE_SEPOLIA)
 	other := "0x2000000000000000000000000000000000000002"
 
-	domain, err := CreateTypedDataDomain(chainID, TypedDataDomainOverride{VerifyingContract: other})
+	domain, err := CreateTypedDataDomain(chainID, TypedDataDomainOverride{
+		Name:              "custom",
+		Version:           "1",
+		VerifyingContract: other,
+	})
 	if err != nil {
 		t.Fatalf("CreateTypedDataDomain: %v", err)
 	}
-	if domain.VerifyingContract != other {
-		t.Errorf("got verifyingContract %q, want %q", domain.VerifyingContract, other)
+	if domain.Name != "custom" || domain.Version != "1" || domain.VerifyingContract != other {
+		t.Errorf("override not applied: %+v", domain)
 	}
-	// untouched fields keep their defaults
-	if domain.Name != "rysk" || domain.Version != "0.0.0" || domain.ChainId == nil {
-		t.Errorf("override clobbered defaults: %+v", domain)
-	}
-	if (*big.Int)(domain.ChainId).Int64() != chainID {
+	// chainId always follows the chain the message is for
+	if domain.ChainId == nil || (*big.Int)(domain.ChainId).Int64() != chainID {
 		t.Errorf("got chainId %v, want %d", domain.ChainId, chainID)
+	}
+}
+
+func TestCreateTypedDataDomainPartialOverrideFails(t *testing.T) {
+	other := "0x2000000000000000000000000000000000000002"
+	cases := map[string]TypedDataDomainOverride{
+		"only name":                  {Name: "custom"},
+		"only version":               {Version: "1"},
+		"only verifyingContract":     {VerifyingContract: other},
+		"missing verifying contract": {Name: "custom", Version: "1"},
+		"missing version":            {Name: "custom", VerifyingContract: other},
+		"missing name":               {Version: "1", VerifyingContract: other},
+	}
+	for name, override := range cases {
+		if _, err := CreateTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), override); err == nil {
+			t.Errorf("%s: expected an error for %+v", name, override)
+		}
 	}
 }
 
 func TestCreateTypedDataDomainErrors(t *testing.T) {
 	cases := map[string]TypedDataDomainOverride{
-		"bad verifyingContract": {VerifyingContract: "0xnothex"},
+		"bad verifyingContract": {Name: "custom", Version: "1", VerifyingContract: "0xnothex"},
 	}
 	for name, override := range cases {
 		if _, err := CreateTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), override); err == nil {
@@ -88,7 +109,11 @@ func TestCreateTypedDataDomainUnknownChain(t *testing.T) {
 	}
 
 	other := "0x2000000000000000000000000000000000000002"
-	domain, err = CreateTypedDataDomain(1234, TypedDataDomainOverride{VerifyingContract: other})
+	domain, err = CreateTypedDataDomain(1234, TypedDataDomainOverride{
+		Name:              "custom",
+		Version:           "1",
+		VerifyingContract: other,
+	})
 	if err != nil {
 		t.Fatalf("CreateTypedDataDomain: %v", err)
 	}
@@ -117,7 +142,11 @@ func TestCreateQuoteMessageDomainAffectsHash(t *testing.T) {
 	}
 
 	// An explicit domain equal to the default must not change the signed hash.
-	explicit, err := CreateTypedDataDomain(int64(q.ChainID), TypedDataDomainOverride{Name: "rysk", Version: "0.0.0"})
+	explicit, err := CreateTypedDataDomain(int64(q.ChainID), TypedDataDomainOverride{
+		Name:              "rysk",
+		Version:           "0.0.0",
+		VerifyingContract: ADDRESSES[CHAIN_ID_BASE_SEPOLIA].Rysk.String(),
+	})
 	if err != nil {
 		t.Fatalf("explicit domain: %v", err)
 	}
@@ -130,10 +159,11 @@ func TestCreateQuoteMessageDomainAffectsHash(t *testing.T) {
 	}
 
 	// Each overridable field must change it.
+	rysk := ADDRESSES[CHAIN_ID_BASE_SEPOLIA].Rysk.String()
 	overrides := map[string]TypedDataDomainOverride{
-		"name":              {Name: "custom"},
-		"version":           {Version: "1"},
-		"verifyingContract": {VerifyingContract: "0x2000000000000000000000000000000000000002"},
+		"name":              {Name: "custom", Version: "0.0.0", VerifyingContract: rysk},
+		"version":           {Name: "rysk", Version: "1", VerifyingContract: rysk},
+		"verifyingContract": {Name: "rysk", Version: "0.0.0", VerifyingContract: "0x2000000000000000000000000000000000000002"},
 	}
 	for field, override := range overrides {
 		domain, err := CreateTypedDataDomain(int64(q.ChainID), override)
@@ -165,5 +195,53 @@ func TestCreateTransferMessageUnaffected(t *testing.T) {
 	}
 	if got := len(typedData.Types["EIP712Domain"]); got != 4 {
 		t.Errorf("got %d transfer domain fields, want 4", got)
+	}
+}
+
+func TestCreateQuoteMessagePremiumAssetIsNotSigned(t *testing.T) {
+	q := testQuote()
+
+	bare, _, err := CreateQuoteMessage(q, nil)
+	if err != nil {
+		t.Fatalf("without premium asset: %v", err)
+	}
+
+	q.PremiumAsset = "0x2000000000000000000000000000000000000002"
+	withPremium, typedData, err := CreateQuoteMessage(q, nil)
+	if err != nil {
+		t.Fatalf("with premium asset: %v", err)
+	}
+
+	if string(withPremium) != string(bare) {
+		t.Error("premium asset changed the signed hash")
+	}
+	if _, ok := typedData.Message["premiumAsset"]; ok {
+		t.Error("premium asset leaked into the signed message")
+	}
+	for _, field := range typedData.Types["Quote"] {
+		if field.Name == "premiumAsset" {
+			t.Error("premium asset leaked into the Quote type")
+		}
+	}
+}
+
+func TestQuotePayloadCarriesPremiumAsset(t *testing.T) {
+	q := testQuote()
+
+	encoded, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "premiumAsset") {
+		t.Error("premiumAsset should be omitted when unset")
+	}
+
+	q.PremiumAsset = "0x2000000000000000000000000000000000000002"
+	encoded, err = json.Marshal(q)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"premiumAsset":"`+q.PremiumAsset+`"`) {
+		t.Errorf("premiumAsset missing from payload: %s", encoded)
 	}
 }

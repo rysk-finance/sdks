@@ -123,18 +123,23 @@ Flags
 - `--valid_until` (**required**): Quote validity timestamp.
 - `--collateral` (**required**): Accepted collateral asset.
 - `--private_key` (**required**): Private key for signing.
+- `--premium_asset`: Asset the premium is paid in. Left out of the quote when
+  not set, and never part of the signature.
 
 The EIP712 domain the quote is signed against defaults to `name: rysk`,
 `version: 0.0.0`, `chainId: --chain_id` and the Rysk contract on that chain.
-`chainId` always follows `--chain_id`. The other three can be overridden on
-their own; the flags below are optional and a flag left out keeps its default.
+The domain flags are all or nothing: pass all three or none. `chainId` always
+follows `--chain_id`.
 
 - `--domain_name`: EIP712 domain name.
 - `--domain_version`: EIP712 domain version.
 - `--domain_verifying_contract`: EIP712 domain verifying contract.
 
 ```bash
-./ryskV12 quote ... --domain_verifying_contract 0x0ff34dd648b68f09b199b60b91442e750fd13fdc
+./ryskV12 quote ... \
+  --domain_name rysk \
+  --domain_version 0.0.0 \
+  --domain_verifying_contract 0x0ff34dd648b68f09b199b60b91442e750fd13fdc
 ```
 
 ---
