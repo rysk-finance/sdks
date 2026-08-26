@@ -8,9 +8,9 @@
 //   node examples/premium.js
 //
 // PREMIUM_URL is optional: left out, the CLI talks to production.
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { unlinkSync, writeFileSync } from "node:fs";
 
-import Rysk, { Env } from "ryskv12";
+import Rysk, { Env, NonceCounter } from "ryskv12";
 import { isRequest } from "ryskv12/models";
 
 const PK = process.env.RYSK_SDK_PK;
@@ -23,26 +23,12 @@ const POLL_INTERVAL_MS = 2_000;
 const QUOTE_VALIDITY_SECONDS = 8 * 60;
 const REFRESH_BEFORE_SECONDS = 3 * 60;
 
-const NONCE_FILE = ".rysk-nonce";
+// one counter per signing key, shared by quotes and cancels
+const nonces = new NonceCounter(".rysk-nonce");
 const BATCH_FILE = ".rysk-batch.json";
 
 const sdk = new Rysk(Env.TESTNET, PK, "./ryskV12");
 
-/**
- * Nonces are spent once and share one keyspace per address across quotes and
- * cancels, so they come from a single counter that survives a restart. A counter
- * that rewinds starts failing every write.
- */
-const nextNonce = () => {
-  let counter = Date.now();
-  try {
-    counter = Math.max(counter, Number(readFileSync(NONCE_FILE, "utf8")) + 1);
-  } catch {
-    // first run, start from the clock
-  }
-  writeFileSync(NONCE_FILE, String(counter));
-  return String(counter);
-};
 
 /** Runs one CLI command to completion and returns its stdout. */
 const runOnce = (args) =>
@@ -51,6 +37,8 @@ const runOnce = (args) =>
     let stdout = "";
     let stderr = "";
     proc.on("message", (data) => (stdout += data.toString()));
+    // the CLI logs on stderr; a failure is the exit code, not this
+    proc.on("stderr", (data) => (stderr += data.toString()));
     proc.on("error", (err) => (stderr += err.toString()));
     proc.on("close", (code) => {
       if (code === 0) {
@@ -88,7 +76,7 @@ const buildQuote = (request) => ({
   usd: request.usd,
   collateralAsset: request.collateralAsset,
   maker: MAKER,
-  nonce: nextNonce(),
+  nonce: nonces.next(),
   price: priceRequest(request),
   validUntil: Math.floor(Date.now() / 1000) + QUOTE_VALIDITY_SECONDS,
   domain: request.typeDataDomain,
@@ -141,7 +129,7 @@ const reconcile = async () => {
 
 const cancel = async (requestId, tracked) => {
   if (!tracked.id) return; // never seen on the book, nothing to pull
-  await runOnce(sdk.premiumCancelArgs(tracked.id, tracked.chainId, nextNonce(), PREMIUM_URL));
+  await runOnce(sdk.premiumCancelArgs(tracked.id, tracked.chainId, nonces.next(), PREMIUM_URL));
   live.delete(requestId);
   console.log(`cancelled ${tracked.id}`);
 };

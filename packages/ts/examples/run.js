@@ -6,9 +6,7 @@
 //   RYSK_MAKER=0x<maker address> \
 //   RYSK_ASSET=0x<asset address> \
 //   node examples/run.js
-import { readFileSync, writeFileSync } from "node:fs";
-
-import Rysk, { Env } from "ryskv12";
+import Rysk, { Env, NonceCounter } from "ryskv12";
 import {
   isJSONRPCResponse,
   isQuoteNotification,
@@ -22,24 +20,11 @@ const ASSET = process.env.RYSK_ASSET || "0x5555555555555555555555555555555555555
 const MAKER_CHANNEL = "MAKER_CHAN";
 const RFQ_CHANNEL = "RFQ_CHAN";
 const QUOTE_VALIDITY_SECONDS = 30;
-const NONCE_FILE = ".rysk-nonce";
+// one counter per signing key, shared by quotes and cancels
+const nonces = new NonceCounter(".rysk-nonce");
 
 const sdk = new Rysk(Env.TESTNET, PK, "./ryskV12");
 
-/**
- * Nonces are spent once per address, so they come from a single counter that
- * survives a restart - one that rewinds starts failing every write.
- */
-const nextNonce = () => {
-  let counter = Date.now();
-  try {
-    counter = Math.max(counter, Number(readFileSync(NONCE_FILE, "utf8")) + 1);
-  } catch {
-    // first run, start from the clock
-  }
-  writeFileSync(NONCE_FILE, String(counter));
-  return String(counter);
-};
 
 /** Replace with your own pricing. Quantity and strike come from the request. */
 const priceRequest = (request) => {
@@ -63,7 +48,7 @@ const buildQuote = (request) => ({
   usd: request.usd,
   collateralAsset: request.collateralAsset,
   maker: MAKER,
-  nonce: nextNonce(),
+  nonce: nonces.next(),
   price: priceRequest(request),
   validUntil: Math.ceil(Date.now() / 1000) + QUOTE_VALIDITY_SECONDS,
   // sent with the quote but not signed; present when the request names one
@@ -100,12 +85,15 @@ const main = () => {
       console.log("maker:", payload);
     }
   };
-  makerProc.on("error", (err) => console.error("maker error:", err.toString()));
+  makerProc.on("stderr", (data) => console.error("maker log:", data.toString().trim()));
+  makerProc.on("error", (err) => console.error("maker process failed:", err.toString()));
 
   const quote = (id, request) => {
     const proc = sdk.execute(sdk.quoteArgs(MAKER_CHANNEL, id, buildQuote(request)));
     proc.on("message", (data) => console.log("quote:", data.toString().trim()));
-    proc.on("error", (err) => console.error("quote error:", err.toString()));
+    proc.on("stderr", (data) => console.error("quote log:", data.toString().trim()));
+    // a rejected quote is a non-zero exit code, not an "error" event
+    proc.on("close", (code) => code !== 0 && console.error(`quote exited ${code}`));
   };
 
   const rfqProc = sdk.execute(sdk.connectArgs(RFQ_CHANNEL, `rfqs/${ASSET}`));
@@ -123,7 +111,8 @@ const main = () => {
       console.error("failed to handle rfq:", error);
     }
   };
-  rfqProc.on("error", (err) => console.error("rfq error:", err.toString()));
+  rfqProc.on("stderr", (data) => console.error("rfq log:", data.toString().trim()));
+  rfqProc.on("error", (err) => console.error("rfq process failed:", err.toString()));
 
   // Account reads go through the maker channel like everything else.
   sdk.execute(sdk.balancesArgs(MAKER_CHANNEL, MAKER));

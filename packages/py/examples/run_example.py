@@ -16,6 +16,7 @@ import sys
 import time
 
 from ryskV12.client import Env, Rysk
+from ryskV12.nonce import NonceCounter
 from ryskV12.models import (
     Quote,
     Request,
@@ -31,23 +32,10 @@ ASSET = os.environ.get("RYSK_ASSET", "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f
 MAKER_CHANNEL = "maker__py"
 RFQ_CHANNEL = f"{ASSET}__py"
 QUOTE_VALIDITY_SECONDS = 30
-NONCE_FILE = ".rysk-nonce"
+# one counter per signing key, shared by quotes and cancels
+nonces = NonceCounter(".rysk-nonce")
 
 rysk_sdk = Rysk(env=Env.TESTNET, private_key=PK, v12_cli_path="./ryskV12cli")
-
-
-def next_nonce() -> str:
-    """Nonces are spent once per address, so they come from a single counter that
-    survives a restart - one that rewinds starts failing every write."""
-    counter = int(time.time() * 1000)
-    try:
-        with open(NONCE_FILE) as f:
-            counter = max(counter, int(f.read()) + 1)
-    except (FileNotFoundError, ValueError):
-        pass  # first run, start from the clock
-    with open(NONCE_FILE, "w") as f:
-        f.write(str(counter))
-    return str(counter)
 
 
 def price_request(request: Request) -> str:
@@ -71,7 +59,7 @@ def build_quote(request: Request) -> Quote:
         usd=request.usd,
         collateralAsset=request.collateralAsset,
         maker=MAKER,
-        nonce=next_nonce(),
+        nonce=nonces.next(),
         price=price_request(request),
         validUntil=int(time.time()) + QUOTE_VALIDITY_SECONDS,
         # sent with the quote but not signed; present when the request names one

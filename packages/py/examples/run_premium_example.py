@@ -18,6 +18,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from ryskV12.client import Env, Rysk
+from ryskV12.nonce import NonceCounter
 from ryskV12.models import Quote, Request, is_request
 
 PK = os.environ.get("RYSK_SDK_PK", "")
@@ -30,7 +31,8 @@ POLL_INTERVAL = 2
 QUOTE_VALIDITY_SECONDS = 8 * 60
 REFRESH_BEFORE_SECONDS = 3 * 60
 
-NONCE_FILE = ".rysk-nonce"
+# one counter per signing key, shared by quotes and cancels
+nonces = NonceCounter(".rysk-nonce")
 BATCH_FILE = ".rysk-batch.json"
 
 rysk_sdk = Rysk(env=Env.TESTNET, private_key=PK, v12_cli_path="./ryskV12cli")
@@ -38,21 +40,6 @@ rysk_sdk = Rysk(env=Env.TESTNET, private_key=PK, v12_cli_path="./ryskV12cli")
 # request id -> the quote we currently have on the book for it
 live: Dict[str, dict] = {}
 running = True
-
-
-def next_nonce() -> str:
-    """Nonces are spent once and share one keyspace per address across quotes and
-    cancels, so they come from a single counter that survives a restart. A counter
-    that rewinds starts failing every write."""
-    counter = int(time.time() * 1000)
-    try:
-        with open(NONCE_FILE) as f:
-            counter = max(counter, int(f.read()) + 1)
-    except (FileNotFoundError, ValueError):
-        pass  # first run, start from the clock
-    with open(NONCE_FILE, "w") as f:
-        f.write(str(counter))
-    return str(counter)
 
 
 def run_once(args: List[str]) -> str:
@@ -89,7 +76,7 @@ def build_quote(request: Request) -> Quote:
         usd=request.usd,
         collateralAsset=request.collateralAsset,
         maker=MAKER,
-        nonce=next_nonce(),
+        nonce=nonces.next(),
         price=price_request(request),
         validUntil=int(time.time()) + QUOTE_VALIDITY_SECONDS,
         domain=request.typeDataDomain,
@@ -143,7 +130,7 @@ def cancel(request_id: str, tracked: dict) -> None:
     if not tracked["id"]:
         return  # never seen on the book, nothing to pull
     run_once(
-        rysk_sdk.premium_cancel_args(tracked["id"], tracked["chainId"], next_nonce(), PREMIUM_URL)
+        rysk_sdk.premium_cancel_args(tracked["id"], tracked["chainId"], nonces.next(), PREMIUM_URL)
     )
     live.pop(request_id, None)
     print(f"cancelled {tracked['id']}")

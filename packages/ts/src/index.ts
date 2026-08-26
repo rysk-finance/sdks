@@ -21,17 +21,19 @@ class CliWebSocket extends EventEmitter {
     super();
     this._childProcess = childProcess;
     this.readyState = ReadyState.OPEN; // The process is spawned, so it's "open" from this perspective
-    this.stdout = this._childProcess.stdout; // backwards compatibility
-    this.stderr = this._childProcess.stdout; // backwards compatibility
+    this.stdout = this._childProcess.stdout;
+    this.stderr = this._childProcess.stderr;
 
     // Handle stdout data as "messages"
     this._childProcess?.stdout?.on("data", (data: Buffer) => {
       this.emit("message", data); // Assuming text messages
     });
 
-    // Handle stderr as "errors"
+    // The CLI logs to stderr, so it is not an error channel: a failed command is
+    // a non-zero exit code, and "error" is reserved for the process itself
+    // failing.
     this._childProcess?.stderr?.on("data", (data: Buffer) => {
-      this.emit("error", new Error(data.toString()));
+      this.emit("stderr", data);
     });
 
     // Handle process close
@@ -72,6 +74,7 @@ class CliWebSocket extends EventEmitter {
   public onmessage?: (msg: Buffer) => void;
   public onclose?: () => void;
   public onerror?: (event: Buffer) => void;
+  public onstderr?: (msg: Buffer) => void;
 
   // Override emit to trigger on* handlers
   public emit(eventName: string | symbol, ...args: any[]): boolean {
@@ -83,6 +86,8 @@ class CliWebSocket extends EventEmitter {
       this.onclose();
     } else if (eventName === "error" && this.onerror) {
       this.onerror(args[0]);
+    } else if (eventName === "stderr" && this.onstderr) {
+      this.onstderr(args[0]);
     }
     return super.emit(eventName, ...args);
   }
@@ -499,5 +504,7 @@ class Rysk {
     ];
   }
 }
+
+export { NonceCounter } from "./nonce.js";
 
 export default Rysk;

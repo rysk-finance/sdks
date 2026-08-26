@@ -9,6 +9,18 @@ If the script fails to do so please navigate to https://github.com/rysk-finance/
 
 ## Run
 
+### Process events
+
+`execute` returns a `CliWebSocket`, an `EventEmitter` with WebSocket-style handlers:
+
+| Event | Handler | Carries |
+| --- | --- | --- |
+| `open` | `onopen` | the process was spawned |
+| `message` | `onmessage` | a chunk of the CLI's stdout |
+| `stderr` | `onstderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
+| `close` | `onclose` | the exit code; a non-zero one is how a command reports failure |
+| `error` | `onerror` | the process itself failed to spawn or run |
+
 ### Core `execute` method
 
 The `execute` method spawns a subprocess and returns it.
@@ -210,6 +222,23 @@ RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
   PREMIUM_URL=https://insti-testnet.rysk.finance node examples/premium.js
 ```
 
-Both keep their nonce counter in a `.rysk-nonce` file, because a nonce is spent once per address and a
-counter that rewinds after a restart starts failing every write. `priceRequest` is the only part meant
-to be replaced — everything else is the plumbing the api expects.
+Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
+once per address and a counter that rewinds after a restart starts failing every write. `priceRequest`
+is the only part meant to be replaced — everything else is the plumbing the api expects.
+
+```ts
+import { NonceCounter } from "ryskv12";
+
+const nonces = new NonceCounter(".rysk-nonce"); // one counter per signing key
+const quoteNonce = nonces.next();               // decimal string, never reused, never rewound
+```
+
+## Tests
+
+```sh
+yarn test                     # unit tests
+make dev-bin && yarn test     # + the integration tests, which need a cli
+```
+
+`test/integration.test.js` runs the real CLI against a fake api, so the arg builders and the binary
+cannot drift apart. Those tests skip themselves when no CLI is present.

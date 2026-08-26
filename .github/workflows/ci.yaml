@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: packages/cli/go.mod
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
@@ -31,6 +32,8 @@ jobs:
           node-version: "lts/*"
       - run: yarn install --frozen-lockfile --ignore-scripts
       - run: yarn build
+      # the integration tests skip themselves without a cli; the integration job runs them
+      - run: yarn test
 
   py:
     runs-on: ubuntu-latest
@@ -44,4 +47,38 @@ jobs:
           python-version: "3.12"
       - run: pipx install poetry
       - run: poetry install
+      - run: poetry run pytest
       - run: poetry build
+
+  # The SDKs only build argument lists; whether the CLI accepts them is a
+  # different question, so this job builds the binary and runs both SDKs against
+  # a fake api through it.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/cli/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the cli into both packages
+        run: make dev-bin
+
+      - name: TypeScript against the cli
+        working-directory: packages/ts
+        run: |
+          yarn install --frozen-lockfile --ignore-scripts
+          yarn test
+
+      - name: Python against the cli
+        working-directory: packages/py
+        run: |
+          pipx install poetry
+          poetry install
+          poetry run pytest tests/integration -v

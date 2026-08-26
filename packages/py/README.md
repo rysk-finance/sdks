@@ -180,20 +180,39 @@ single persisted counter.
 
 ## Examples
 
-Two runnable maker loops live in `tests/`, one per transport:
+Two runnable maker loops live in `examples/`, one per transport:
 
 | File | What it does |
 | --- | --- |
-| `tests/run_example.py` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker channel. Also reads balances and positions, and disconnects both channels on `SIGINT`. |
-| `tests/run_premium_example.py` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
+| `examples/run_example.py` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker channel. Also reads balances and positions, and disconnects both channels on `SIGINT`. |
+| `examples/run_premium_example.py` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
 
 ```sh
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> python tests/run_example.py
+RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> python examples/run_example.py
 
 RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
-  PREMIUM_URL=https://insti-testnet.rysk.finance python tests/run_premium_example.py
+  PREMIUM_URL=https://insti-testnet.rysk.finance python examples/run_premium_example.py
 ```
 
-Both keep their nonce counter in a `.rysk-nonce` file, because a nonce is spent once per address and a
-counter that rewinds after a restart starts failing every write. `price_request` is the only part meant
-to be replaced — everything else is the plumbing the api expects.
+Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
+once per address and a counter that rewinds after a restart starts failing every write.
+`price_request` is the only part meant to be replaced — everything else is the plumbing the api
+expects.
+
+```python
+from ryskV12.nonce import NonceCounter
+
+nonces = NonceCounter(".rysk-nonce")  # one counter per signing key
+quote_nonce = nonces.next()           # decimal string, never reused, never rewound
+```
+
+## Tests
+
+```sh
+poetry install
+poetry run pytest                 # unit tests
+make dev-bin && poetry run pytest # + the integration tests, which need a cli
+```
+
+`tests/integration` runs the real CLI against a fake api, so the arg builders and the binary cannot
+drift apart. Those tests skip themselves when no CLI is present.
