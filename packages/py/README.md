@@ -101,10 +101,21 @@ quote_details = Quote(
     quantity="1",
     strike="1000000",
     validUntil=1678886460,
+    usd="0x...",
+    collateralAsset="0x...",
+    # optional: asset the premium is paid in. Sent with the quote, not signed.
+    premiumAsset=request.premiumAsset,
+    # optional: sign against the domain the request asks for. Omit to use the
+    # default domain for the chain.
+    domain=request.typeDataDomain,
 )
 
 proc = rysk_sdk.execute(rysk_sdk.quote_args(maker_channel, request_id, quote_details))
 ```
+
+`domain` needs `name`, `version` and `verifyingContract` together; its `chainId`
+always comes from the quote, so a domain for another chain - or one carrying a
+`salt` - raises instead of being signed against the wrong domain.
 
 ## Example
 
@@ -112,7 +123,7 @@ proc = rysk_sdk.execute(rysk_sdk.quote_args(maker_channel, request_id, quote_det
 import asyncio
 import json
 import time
-from ryskV12.models import Quote, is_json_rpc_response, is_request
+from ryskV12.models import Quote, Request, is_json_rpc_response, is_request
 from ryskV12.client import Rysk, Env
 
 private_key = ""
@@ -123,19 +134,21 @@ def price_it(public_address: str, req: Request) -> Quote:
     # ...your magic goes here
     price = 4
     return Quote(
-        req.asset,
-        req.chainId,
-        req.expiry,
-        req.isPut,
-        False,
-        public_address,
-        str(int(time.time() * 1000)),
-        f"{price}000000000000000000",
-        req.quantity,
-        req.strike,
-        int(time.time()) + 30,
-        req.usd,
-        req.collateralAsset
+        assetAddress=req.asset,
+        chainId=req.chainId,
+        expiry=req.expiry,
+        isPut=req.isPut,
+        isTakerBuy=False,
+        maker=public_address,
+        nonce=str(int(time.time() * 1000)),
+        price=f"{price}000000000000000000",
+        quantity=req.quantity,
+        strike=req.strike,
+        validUntil=int(time.time()) + 30,
+        usd=req.usd,
+        collateralAsset=req.collateralAsset,
+        premiumAsset=req.premiumAsset,
+        domain=req.typeDataDomain,
     )
 
 async def process_rfqs():
@@ -154,18 +167,7 @@ async def process_rfqs():
                     request_id = data["id"]
                     result = data["result"]
                     if is_request(result):
-                        quote = price_it(public_address, Request(
-                            result['asset'],
-                            result['assetName'],
-                            result['chainId'],
-                            result['expiry'],
-                            result['isPut'],
-                            result['quantity'],
-                            result['strike'],
-                            result['taker'],
-                            result['usd'],
-                            result['collateralAsset']
-                        ))
+                        quote = price_it(public_address, Request.from_json(json.dumps(result)))
                         cmd = rysk_sdk.quote_args(maker_chan, request_id, quote)
                         proc = rysk_sdk.execute(cmd)
                         print(proc.stdout.readlines())

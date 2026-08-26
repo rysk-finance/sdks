@@ -119,12 +119,21 @@ const quoteDetails: Quote = {
   validUntil: 1678886460,
   usd: "0x...",
   collateralAsset: "0x....",
+  // optional: asset the premium is paid in. Sent with the quote, not signed.
+  premiumAsset: request.premiumAsset,
+  // optional: sign against the domain the request asks for. Omit to use the
+  // default domain for the chain.
+  domain: request.typeDataDomain,
 };
 
 const proc = ryskSDK.execute(
   ryskSDK.quoteArgs(makerChannel, request_id, quoteDetails)
 );
 ```
+
+`domain` needs `name`, `version` and `verifyingContract` together; its `chainId`
+always comes from the quote, so a domain for another chain - or one carrying a
+`salt` - is rejected instead of being signed against the wrong domain.
 
 ## Example
 

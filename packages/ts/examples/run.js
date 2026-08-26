@@ -39,6 +39,8 @@ const main = () => {
             validUntil: Math.ceil(Date.now() / 1000 + 30),
             usd: result.usd,
             collateralAsset: result.collateralAsset,
+            premiumAsset: result.premiumAsset,
+            domain: result.typeDataDomain,
           };
           let proc = sdk.execute(sdk.quoteArgs(makerChan, id, quote));
 

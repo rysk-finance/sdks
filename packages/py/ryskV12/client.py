@@ -32,7 +32,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "3.0.3"
+    _min_sdk_version: str = "3.1.0"
 
     def __init__(
         self,
@@ -221,9 +221,45 @@ class Rysk:
             "--private_key",
             self._private_key,
         ]
+        if quote.premiumAsset:
+            base.extend(["--premium_asset", quote.premiumAsset])
+        base.extend(self._domain_args(quote))
         if quote.isPut:
             base.append("--is_put")
         if quote.isTakerBuy:
             base.append("--is_taker_buy")
         return base
+
+    def _domain_args(self, quote: Quote) -> List[str]:
+        """Turns a request's domain into the CLI's domain flags. The CLI takes
+        the domain's chainId from the quote, so a domain for another chain, or
+        one using a salt, cannot be signed and is rejected here rather than
+        silently signed against the wrong domain."""
+        domain = quote.domain
+        if domain is None:
+            return []
+
+        if domain.salt:
+            raise ValueError("quote domain: salt is not supported")
+        if domain.chainId is not None and int(str(domain.chainId), 0) != quote.chainId:
+            raise ValueError(
+                f"quote domain: chainId {domain.chainId} does not match the quote's chain {quote.chainId}"
+            )
+
+        missing = [
+            field
+            for field in ("name", "version", "verifyingContract")
+            if not getattr(domain, field)
+        ]
+        if missing:
+            raise ValueError(f"quote domain: missing {', '.join(missing)}")
+
+        return [
+            "--domain_name",
+            domain.name,
+            "--domain_version",
+            domain.version,
+            "--domain_verifying_contract",
+            domain.verifyingContract,
+        ]
 

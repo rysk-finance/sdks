@@ -1,6 +1,31 @@
 from dataclasses import dataclass
 import json
-from typing import Any, Callable, Dict, List, Literal, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
+
+
+@dataclass(frozen=True)
+class TypedDataDomain:
+    """EIP712 domain a quote has to be signed against. chainId is whatever the
+    server sent - go marshals it as a hex string - and is always the chain of
+    the request, so the CLI takes it from the quote itself."""
+
+    name: Optional[str] = None
+    version: Optional[str] = None
+    chainId: Optional[Union[str, int]] = None
+    verifyingContract: Optional[str] = None
+    salt: Optional[str] = None
+
+    @staticmethod
+    def from_dict(j: Optional[Dict[str, Any]]) -> Optional["TypedDataDomain"]:
+        if not j:
+            return None
+        return TypedDataDomain(
+            name=j.get("name"),
+            version=j.get("version"),
+            chainId=j.get("chainId"),
+            verifyingContract=j.get("verifyingContract"),
+            salt=j.get("salt"),
+        )
 
 
 @dataclass(frozen=True)
@@ -15,6 +40,13 @@ class Request:
     taker: str
     usd: str
     collateralAsset: str
+    isTakerBuy: Optional[bool] = None
+    auctionDeadline: Optional[int] = None  # unix milliseconds
+    isPremium: Optional[bool] = None
+    premiumAsset: Optional[str] = None
+    isEIP1271: Optional[bool] = None
+    # present when the request wants its quotes signed against a custom domain
+    typeDataDomain: Optional[TypedDataDomain] = None
 
     @staticmethod
     def from_json(data: str) -> "Request":
@@ -29,7 +61,13 @@ class Request:
             strike=j.get("strike"),
             taker=j.get("taker"),
             usd=j.get("usd"),
-            collateralAsset=j.get("collateralAsset")
+            collateralAsset=j.get("collateralAsset"),
+            isTakerBuy=j.get("isTakerBuy"),
+            auctionDeadline=j.get("auctionDeadline"),
+            isPremium=j.get("isPremium"),
+            premiumAsset=j.get("premiumAsset"),
+            isEIP1271=j.get("isEIP1271"),
+            typeDataDomain=TypedDataDomain.from_dict(j.get("typeDataDomain")),
         )
 
 
@@ -48,6 +86,10 @@ class Quote:
     validUntil: int
     usd: str
     collateralAsset: str
+    # asset the premium is paid in; sent with the quote but not signed
+    premiumAsset: Optional[str] = None
+    # domain to sign against, usually the request's typeDataDomain
+    domain: Optional[TypedDataDomain] = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +144,11 @@ JSONResponseHandler = Callable[[JSONRPCResponse], None]
 from typing import Any, Dict, List, Union
 
 
+def _is_optional(value: Any, expected: type) -> bool:
+    """A field the server may not send at all is only checked when it is there."""
+    return value is None or isinstance(value, expected)
+
+
 def is_request(obj: Any) -> bool:
     """Type predicate for Request."""
     return (
@@ -117,6 +164,12 @@ def is_request(obj: Any) -> bool:
         and isinstance(obj.get("taker"), str)
         and isinstance(obj.get("usd"), str)
         and isinstance(obj.get("collateralAsset"), str)
+        and _is_optional(obj.get("isTakerBuy"), bool)
+        and _is_optional(obj.get("auctionDeadline"), int)
+        and _is_optional(obj.get("isPremium"), bool)
+        and _is_optional(obj.get("premiumAsset"), str)
+        and _is_optional(obj.get("isEIP1271"), bool)
+        and _is_optional(obj.get("typeDataDomain"), dict)
     )
 
 
@@ -139,6 +192,8 @@ def is_quote(obj: Any) -> bool:
         and isinstance(obj.get("validUntil"), int)
         and isinstance(obj.get("usd"), str)
         and isinstance(obj.get("collateralAsset"), str)
+        and _is_optional(obj.get("premiumAsset"), str)
+        and _is_optional(obj.get("domain"), dict)
     )
 
 

@@ -116,7 +116,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "3.0.3";
+  private _minSdkVersion: string = "3.1.0";
 
   constructor(env: Env, privateKey: string, v12CliPath: string = "./ryskV12") {
     this._env = env;
@@ -206,6 +206,47 @@ class Rysk {
     return ["positions", "--channel_id", channelId, "--account", account];
   }
 
+  /**
+   * Turns a request's domain into the CLI's domain flags. The CLI takes the
+   * domain's chainId from the quote, so a domain for another chain, or one using
+   * a salt, cannot be signed and is rejected here rather than silently signed
+   * against the wrong domain.
+   */
+  private _domainArgs(quote: Quote): Array<string> {
+    const domain = quote.domain;
+    if (!domain) {
+      return [];
+    }
+
+    if (domain.salt) {
+      throw new Error("quote domain: salt is not supported");
+    }
+    if (domain.chainId !== undefined && domain.chainId !== null) {
+      const domainChainId = Number(domain.chainId);
+      if (domainChainId !== quote.chainId) {
+        throw new Error(
+          `quote domain: chainId ${domain.chainId} does not match the quote's chain ${quote.chainId}`,
+        );
+      }
+    }
+
+    const missing = (["name", "version", "verifyingContract"] as const).filter(
+      (field) => !domain[field],
+    );
+    if (missing.length) {
+      throw new Error(`quote domain: missing ${missing.join(", ")}`);
+    }
+
+    return [
+      "--domain_name",
+      domain.name!,
+      "--domain_version",
+      domain.version!,
+      "--domain_verifying_contract",
+      domain.verifyingContract!,
+    ];
+  }
+
   public quoteArgs(channelId: string, rfqId: string, quote: Quote) {
     return [
       "quote",
@@ -237,6 +278,8 @@ class Rysk {
       quote.collateralAsset,
       "--private_key",
       this._private_key,
+      ...(quote.premiumAsset ? ["--premium_asset", quote.premiumAsset] : []),
+      ...this._domainArgs(quote),
       quote.isPut ? "--is_put" : "",
       quote.isTakerBuy ? "--is_taker_buy" : "",
     ];

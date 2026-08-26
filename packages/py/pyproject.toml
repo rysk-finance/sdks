@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ryskV12"
-version = "3.0.3"
+version = "3.1.0"
 description = "Python sdk to interact with Rysk v12"
 authors = ["thundering-silence <jack@rysk.finance>"]
 license = "MIT"

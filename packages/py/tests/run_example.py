@@ -15,18 +15,21 @@ def price_it(public_address: str, req: Request) -> Quote:
     # ...your magic goes here
     price = 4
     return Quote(
-        req.asset,
-        req.chainId,
-        req.expiry,
-        req.isPut,
-        False,
-        public_address,
-        str(int(time.time() * 1000)),
-        f"{price}000000000000000000",
-        req.quantity,
-        req.strike,
-        int(time.time()) + 30,
-        req.usd,
+        assetAddress=req.asset,
+        chainId=req.chainId,
+        expiry=req.expiry,
+        isPut=req.isPut,
+        isTakerBuy=False,
+        maker=public_address,
+        nonce=str(int(time.time() * 1000)),
+        price=f"{price}000000000000000000",
+        quantity=req.quantity,
+        strike=req.strike,
+        validUntil=int(time.time()) + 30,
+        usd=req.usd,
+        collateralAsset=req.collateralAsset,
+        premiumAsset=req.premiumAsset,
+        domain=req.typeDataDomain,
     )
 
 
@@ -48,17 +51,7 @@ async def process_rfqs():
                     request_id = data["id"]
                     result = data["result"]
                     if is_request(result):
-                        quote = price_it(public_address, Request(
-                            result['asset'],
-                            result['assetName'],
-                            result['chainId'],
-                            result['expiry'],
-                            result['isPut'],
-                            result['quantity'],
-                            result['strike'],
-                            result['taker'],
-                            result['usd'],
-                        ))
+                        quote = price_it(public_address, Request.from_json(json.dumps(result)))
                         cmd = rysk_sdk.quote_args(maker_chan, request_id, quote)
                         proc = rysk_sdk.execute(cmd)
                         print(proc.stdout.readlines())
