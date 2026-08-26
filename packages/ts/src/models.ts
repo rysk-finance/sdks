@@ -14,8 +14,11 @@ export type TypedDataDomain = {
 };
 
 export type Request = {
+  /** server assigned id, on premium rfq requests - the websocket flow carries it on the JSONRPC response instead */
+  id?: string;
   asset: HexString;
-  assetName: string;
+  /** absent on premium rfq requests */
+  assetName?: string;
   chainId: number;
   expiry: number;
   isPut: boolean;
@@ -25,6 +28,12 @@ export type Request = {
   taker: HexString;
   usd: HexString;
   collateralAsset: HexString;
+  /** unix milliseconds, on premium rfq requests */
+  validUntil?: number;
+  /** empty means the request is open to every maker */
+  makers?: Array<HexString>;
+  /** unix seconds, set by the server */
+  createdAt?: number;
   /** unix milliseconds */
   auctionDeadline?: number;
   isPremium?: boolean;
@@ -91,7 +100,6 @@ export function isRequest(obj: any): obj is Request {
     typeof obj === "object" &&
     obj !== null &&
     typeof obj.asset === "string" &&
-    typeof obj.assetName === "string" &&
     typeof obj.chainId === "number" &&
     typeof obj.expiry === "number" &&
     typeof obj.isPut === "boolean" &&
@@ -100,6 +108,10 @@ export function isRequest(obj: any): obj is Request {
     typeof obj.taker === "string" &&
     typeof obj.usd === "string" &&
     typeof obj.collateralAsset === "string" &&
+    isOptional(obj.id, "string") &&
+    isOptional(obj.assetName, "string") &&
+    isOptional(obj.validUntil, "number") &&
+    isOptional(obj.createdAt, "number") &&
     isOptional(obj.isTakerBuy, "boolean") &&
     isOptional(obj.auctionDeadline, "number") &&
     isOptional(obj.isPremium, "boolean") &&

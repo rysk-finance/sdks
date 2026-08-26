@@ -31,7 +31,6 @@ class TypedDataDomain:
 @dataclass(frozen=True)
 class Request:
     asset: str
-    assetName: str
     chainId: int
     expiry: int
     isPut: bool
@@ -40,6 +39,13 @@ class Request:
     taker: str
     usd: str
     collateralAsset: str
+    # server assigned id, on premium rfq requests - the websocket flow carries it
+    # on the JSONRPC response instead
+    id: Optional[str] = None
+    assetName: Optional[str] = None  # absent on premium rfq requests
+    createdAt: Optional[int] = None  # unix seconds, set by the server
+    validUntil: Optional[int] = None  # unix milliseconds
+    makers: Optional[List[str]] = None  # empty means open to every maker
     isTakerBuy: Optional[bool] = None
     auctionDeadline: Optional[int] = None  # unix milliseconds
     isPremium: Optional[bool] = None
@@ -62,6 +68,10 @@ class Request:
             taker=j.get("taker"),
             usd=j.get("usd"),
             collateralAsset=j.get("collateralAsset"),
+            id=j.get("id"),
+            createdAt=j.get("createdAt"),
+            validUntil=j.get("validUntil"),
+            makers=j.get("makers"),
             isTakerBuy=j.get("isTakerBuy"),
             auctionDeadline=j.get("auctionDeadline"),
             isPremium=j.get("isPremium"),
@@ -155,7 +165,6 @@ def is_request(obj: Any) -> bool:
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("asset"), str)
-        and isinstance(obj.get("assetName"), str)
         and isinstance(obj.get("chainId"), int)
         and isinstance(obj.get("expiry"), int)
         and isinstance(obj.get("isPut"), bool)
@@ -164,6 +173,11 @@ def is_request(obj: Any) -> bool:
         and isinstance(obj.get("taker"), str)
         and isinstance(obj.get("usd"), str)
         and isinstance(obj.get("collateralAsset"), str)
+        and _is_optional(obj.get("id"), str)
+        and _is_optional(obj.get("assetName"), str)
+        and _is_optional(obj.get("createdAt"), int)
+        and _is_optional(obj.get("validUntil"), int)
+        and _is_optional(obj.get("makers"), list)
         and _is_optional(obj.get("isTakerBuy"), bool)
         and _is_optional(obj.get("auctionDeadline"), int)
         and _is_optional(obj.get("isPremium"), bool)
