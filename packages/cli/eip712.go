@@ -15,18 +15,25 @@ import (
 
 var ZeroAddress = common.HexToAddress("0x0")
 
-// EIP712_DOMAIN_FIELDS lists every supported domain field with its type, in the
-// order EIP712 defines them. Only the fields a domain actually populates end up
-// in its EIP712Domain type, as the spec requires.
-var EIP712_DOMAIN_FIELDS = []apitypes.Type{
-	{Name: "name", Type: "string"},
-	{Name: "version", Type: "string"},
-	{Name: "chainId", Type: "uint256"},
-	{Name: "verifyingContract", Type: "address"},
-	{Name: "salt", Type: "bytes32"},
-}
-
 var EIP712_TYPES = &apitypes.Types{
+	"EIP712Domain": {
+		{
+			Name: "name",
+			Type: "string",
+		},
+		{
+			Name: "version",
+			Type: "string",
+		},
+		{
+			Name: "chainId",
+			Type: "uint256",
+		},
+		{
+			Name: "verifyingContract",
+			Type: "address",
+		},
+	},
 	"Quote": {
 		{
 			Name: "assetAddress",
@@ -157,10 +164,11 @@ func createEIP712Domain(chainId int64) *apitypes.TypedDataDomain {
 }
 
 // ParseTypedDataDomain layers a JSON EIP712 domain over the default domain for
-// chainId. Fields the JSON omits keep their default value, so a caller can
-// override just the verifyingContract; setting a field to "" (or chainId to
-// null) drops it from the domain entirely. An empty json string returns the
-// default domain unchanged.
+// chainId. The domain has exactly the four fields of the EIP712Domain type -
+// name, version, chainId and verifyingContract - and every one of them must end
+// up set, so the json may override any subset of them but may not drop one or
+// introduce a field (salt included) the type does not carry. An empty json
+// string returns the default domain unchanged.
 func ParseTypedDataDomain(chainId int64, raw string) (*apitypes.TypedDataDomain, error) {
 	domain := *createEIP712Domain(chainId)
 
@@ -169,41 +177,47 @@ func ParseTypedDataDomain(chainId int64, raw string) (*apitypes.TypedDataDomain,
 		return &domain, nil
 	}
 
-	if err := json.Unmarshal([]byte(raw), &domain); err != nil {
+	var override struct {
+		Name              *string               `json:"name"`
+		Version           *string               `json:"version"`
+		ChainId           *math.HexOrDecimal256 `json:"chainId"`
+		VerifyingContract *string               `json:"verifyingContract"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&override); err != nil {
 		return nil, fmt.Errorf("invalid domain json: %w", err)
 	}
 
-	if domain.VerifyingContract != "" && !common.IsHexAddress(domain.VerifyingContract) {
-		return nil, fmt.Errorf("invalid domain verifyingContract %q", domain.VerifyingContract)
+	if override.Name != nil {
+		domain.Name = *override.Name
 	}
-	if len(domain.Map()) == 0 {
-		return nil, errors.New("domain is undefined: every field was dropped")
+	if override.Version != nil {
+		domain.Version = *override.Version
+	}
+	if override.ChainId != nil {
+		domain.ChainId = override.ChainId
+	}
+	if override.VerifyingContract != nil {
+		domain.VerifyingContract = *override.VerifyingContract
+	}
+
+	if domain.Name == "" {
+		return nil, errors.New("domain name is empty")
+	}
+	if domain.Version == "" {
+		return nil, errors.New("domain version is empty")
+	}
+	if !common.IsHexAddress(domain.VerifyingContract) {
+		return nil, fmt.Errorf("invalid domain verifyingContract %q", domain.VerifyingContract)
 	}
 
 	return &domain, nil
 }
 
-// domainType returns the EIP712Domain type covering exactly the fields the
-// domain populates. Hashing a domain against a type that names absent fields
-// fails, and one that omits present fields silently ignores them.
-func domainType(domain *apitypes.TypedDataDomain) []apitypes.Type {
-	populated := domain.Map()
-	fields := make([]apitypes.Type, 0, len(EIP712_DOMAIN_FIELDS))
-	for _, field := range EIP712_DOMAIN_FIELDS {
-		if _, ok := populated[field.Name]; ok {
-			fields = append(fields, field)
-		}
-	}
-	return fields
-}
-
 func createEIP712TypedData(domain *apitypes.TypedDataDomain, msgType string, msg map[string]interface{}) *apitypes.TypedData {
-	types := apitypes.Types{"EIP712Domain": domainType(domain)}
-	for name, fields := range *EIP712_TYPES {
-		types[name] = fields
-	}
 	return &apitypes.TypedData{
-		Types:       types,
+		Types:       *EIP712_TYPES,
 		PrimaryType: msgType,
 		Domain:      *domain,
 		Message:     msg,

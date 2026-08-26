@@ -64,6 +64,19 @@ func TestParseTypedDataDomainOverrides(t *testing.T) {
 	}
 }
 
+func TestParseTypedDataDomainNullKeepsDefault(t *testing.T) {
+	domain, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), `{"chainId":null,"name":null}`)
+	if err != nil {
+		t.Fatalf("ParseTypedDataDomain: %v", err)
+	}
+	if domain.ChainId == nil || (*big.Int)(domain.ChainId).Int64() != int64(CHAIN_ID_BASE_SEPOLIA) {
+		t.Errorf("null chainId did not keep the default: %v", domain.ChainId)
+	}
+	if domain.Name != "rysk" {
+		t.Errorf("null name did not keep the default: %q", domain.Name)
+	}
+}
+
 func TestParseTypedDataDomainChainIdFormats(t *testing.T) {
 	for _, raw := range []string{`{"chainId":8453}`, `{"chainId":"8453"}`, `{"chainId":"0x2105"}`} {
 		domain, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), raw)
@@ -78,9 +91,13 @@ func TestParseTypedDataDomainChainIdFormats(t *testing.T) {
 
 func TestParseTypedDataDomainErrors(t *testing.T) {
 	cases := map[string]string{
-		"malformed json":        `{"name":`,
-		"bad verifyingContract": `{"verifyingContract":"0xnothex"}`,
-		"every field dropped":   `{"name":"","version":"","chainId":null,"verifyingContract":"","salt":""}`,
+		"malformed json":             `{"name":`,
+		"bad verifyingContract":      `{"verifyingContract":"0xnothex"}`,
+		"empty name":                 `{"name":""}`,
+		"empty version":              `{"version":""}`,
+		"empty verifyingContract":    `{"verifyingContract":""}`,
+		"salt is not a domain field": `{"salt":"0x0000000000000000000000000000000000000000000000000000000000000001"}`,
+		"unknown field":              `{"nope":1}`,
 	}
 	for name, raw := range cases {
 		if _, err := ParseTypedDataDomain(int64(CHAIN_ID_BASE_SEPOLIA), raw); err == nil {
@@ -127,39 +144,35 @@ func TestCreateQuoteMessageDomainAffectsHash(t *testing.T) {
 	}
 }
 
-func TestCreateQuoteMessageDomainTypeTracksFields(t *testing.T) {
+func TestCreateQuoteMessageDomainFieldsAreFixed(t *testing.T) {
 	q := testQuote()
 
-	salted, err := ParseTypedDataDomain(int64(q.ChainID), `{"salt":"0x0000000000000000000000000000000000000000000000000000000000000001"}`)
+	domain, err := ParseTypedDataDomain(int64(q.ChainID), `{"name":"custom","version":"1"}`)
 	if err != nil {
-		t.Fatalf("salted domain: %v", err)
+		t.Fatalf("custom domain: %v", err)
 	}
-	saltedHash, saltedData, err := CreateQuoteMessage(q, salted)
+	customHash, customData, err := CreateQuoteMessage(q, domain)
 	if err != nil {
-		t.Fatalf("salted domain: %v", err)
-	}
-	if got := len(saltedData.Types["EIP712Domain"]); got != 5 {
-		t.Fatalf("got %d domain fields with salt, want 5", got)
+		t.Fatalf("custom domain: %v", err)
 	}
 
-	trimmed, err := ParseTypedDataDomain(int64(q.ChainID), `{"name":""}`)
-	if err != nil {
-		t.Fatalf("trimmed domain: %v", err)
+	want := []string{"name", "version", "chainId", "verifyingContract"}
+	fields := customData.Types["EIP712Domain"]
+	if len(fields) != len(want) {
+		t.Fatalf("got %d domain fields, want %d", len(fields), len(want))
 	}
-	trimmedHash, trimmedData, err := CreateQuoteMessage(q, trimmed)
-	if err != nil {
-		t.Fatalf("trimmed domain: %v", err)
-	}
-	if got := len(trimmedData.Types["EIP712Domain"]); got != 3 {
-		t.Fatalf("got %d domain fields without name, want 3", got)
+	for i, name := range want {
+		if fields[i].Name != name {
+			t.Errorf("domain field %d is %q, want %q", i, fields[i].Name, name)
+		}
 	}
 
 	defaultHash, _, err := CreateQuoteMessage(q, nil)
 	if err != nil {
 		t.Fatalf("default domain: %v", err)
 	}
-	if string(saltedHash) == string(defaultHash) || string(trimmedHash) == string(defaultHash) {
-		t.Error("changing the domain fields did not change the hash")
+	if string(customHash) == string(defaultHash) {
+		t.Error("custom name/version did not change the hash")
 	}
 }
 

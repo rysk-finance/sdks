@@ -78,7 +78,7 @@ var quoteAction = &cli.Command{
 		},
 		&cli.StringFlag{
 			Name:  "domain",
-			Usage: `optional EIP712 domain as json, e.g. '{"verifyingContract":"0x..."}'. Fields left out fall back to the default domain for --chain_id`,
+			Usage: `optional EIP712 domain as json with fields name, version, chainId and verifyingContract, e.g. '{"verifyingContract":"0x..."}'. Fields left out fall back to the default domain for --chain_id`,
 		},
 	},
 	Action: func(c *cli.Context) error {

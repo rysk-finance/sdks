@@ -123,18 +123,17 @@ Flags
 - `--valid_until` (**required**): Quote validity timestamp.
 - `--collateral` (**required**): Accepted collateral asset.
 - `--private_key` (**required**): Private key for signing.
-- `--domain`: EIP712 domain as json. Omitted fields fall back to the default
-  domain for `--chain_id` (`name: rysk`, `version: 0.0.0`, `chainId`, and the
-  Rysk contract for that chain), so overriding one field is enough:
+- `--domain`: EIP712 domain as json, with the four fields of the `EIP712Domain`
+  type: `name`, `version`, `chainId`, `verifyingContract`. Omitted (or `null`)
+  fields fall back to the default domain for `--chain_id` (`rysk` / `0.0.0` /
+  `--chain_id` / the Rysk contract on that chain), so overriding one is enough:
 
   ```bash
   ./ryskV12 quote ... --domain '{"verifyingContract":"0x0ff34dd648b68f09b199b60b91442e750fd13fdc"}'
   ```
 
-  `chainId` accepts a number, a decimal string or a hex string. Setting a field
-  to `""` (or `chainId` to `null`) drops it from the domain, and the signed
-  `EIP712Domain` type covers exactly the fields that remain. `salt` is
-  supported and is only part of the domain when supplied.
+  `chainId` accepts a number, a decimal string or a hex string. Any other field
+  (`salt` included) is rejected, as is an empty value for one of the four.
 
 ---
 
