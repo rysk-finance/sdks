@@ -13,7 +13,28 @@ get_latest_release() {
 
 # Function to get the architecture-specific asset download URL
 get_arch_specific_asset() {
+  os="$(uname -s)"
   arch="$(uname -m)"
+
+  if [[ "$os" == "Linux" ]]; then
+    os_name="linux"
+  elif [[ "$os" == "Darwin" ]]; then
+    os_name="darwin"
+  else
+    echo "Error: Unsupported OS: $os"
+    return 1
+  fi
+
+  if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+    arch_name="amd64"
+  elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+    arch_name="arm64"
+  else
+    echo "Error: Unsupported architecture: $arch"
+    return 1
+  fi
+
+  asset_name_pattern="ryskV[0-9]+-${os_name}-${arch_name}"
 
   release_json=$(get_latest_release)
   if [[ -z "$release_json" ]]; then
@@ -21,19 +42,10 @@ get_arch_specific_asset() {
     return 1
   fi
 
-  if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
-    asset_name_pattern="ryskV[0-9]+-linux-amd64"
-    elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
-    asset_name_pattern="ryskV[0-9]+-linux-arm64"
-  else
-    echo "Error: Unsupported architecture: $arch"
-    return 1
-  fi
-
   download_url=$(echo "$release_json" | jq -r ".assets[] | select(.name | test(\"$asset_name_pattern\")) | .browser_download_url")
 
   if [[ -z "$download_url" ]]; then
-    echo "Error: No matching asset found for your architecture."
+    echo "Error: No matching asset found for $os_name/$arch_name (expected '$asset_name_pattern')."
     return 1
   fi
 

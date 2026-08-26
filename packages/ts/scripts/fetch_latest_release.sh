@@ -70,21 +70,28 @@ get_arch_specific_asset() {
     prompt_and_exit_for_dependency "jq" # This will exit if jq is missing
   fi
 
+  os=$(uname -s)
   arch=$(uname -m)
-  release_json=$(get_latest_release)
 
-  if [ -z "$release_json" ]; then
-    log_error "Failed to fetch latest release from GitHub. Check network connection or repository URL."
-    return 1
-  fi
+  case "$os" in
+    Linux)
+      os_name="linux"
+      ;;
+    Darwin)
+      os_name="darwin"
+      ;;
+    *)
+      log_error "Unsupported OS: $os. This script only supports Linux and macOS."
+      return 1
+      ;;
+  esac
 
-  asset_name_pattern=""
   case "$arch" in
     x86_64|amd64)
-      asset_name_pattern="ryskV[0-9]+-linux-amd64"
+      arch_name="amd64"
       ;;
     aarch64|arm64)
-      asset_name_pattern="ryskV[0-9]+-linux-arm64"
+      arch_name="arm64"
       ;;
     *)
       log_error "Unsupported architecture: $arch. This script only supports x86_64/amd64 and aarch64/arm64."
@@ -92,11 +99,20 @@ get_arch_specific_asset() {
       ;;
   esac
 
+  asset_name_pattern="ryskV[0-9]+-${os_name}-${arch_name}"
+
+  release_json=$(get_latest_release)
+
+  if [ -z "$release_json" ]; then
+    log_error "Failed to fetch latest release from GitHub. Check network connection or repository URL."
+    return 1
+  fi
+
   download_url=$(echo "$release_json" | jq -r ".assets[] | select(.name | test(\"$asset_name_pattern\"; \"i\")) | .browser_download_url")
 
   if [ -z "$download_url" ]; then
-    log_error "No matching asset found for your architecture ('$arch') in the latest release."
-    log_error "Available assets might differ or the pattern '$asset_name_pattern' is incorrect."
+    log_error "No matching asset found for $os_name/$arch_name in the latest CLI release."
+    log_error "Expected an asset matching '$asset_name_pattern'."
     return 1
   fi
 
