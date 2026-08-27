@@ -6,6 +6,7 @@ import test from "node:test";
 
 import Rysk, { Env, NonceCounter } from "../dist/index.js";
 import {
+  isErrorData,
   isJSONRPCResponse,
   isQuote,
   isQuoteNotification,
@@ -282,6 +283,9 @@ test("the remaining predicates hold", () => {
   );
   assert.ok(isJSONRPCResponse({ jsonrpc: "2.0", id: "1", result: {} }));
   assert.ok(!isJSONRPCResponse({ jsonrpc: "2.0", id: 1, result: {} }));
+  assert.ok(isErrorData({ code: -32000, message: "nope" }));
+  assert.ok(!isErrorData({ code: "-32000", message: "nope" }));
+  assert.ok(!isErrorData({ code: -32000 }));
   assert.ok(
     isQuoteNotification({
       rfqId: "1",
@@ -291,4 +295,29 @@ test("the remaining predicates hold", () => {
       yours: "1",
     }),
   );
+});
+
+test("a failed call is still a response", () => {
+  // The cli sends error and omits result entirely, so a guard that insists on a
+  // well formed result drops every error it reports.
+  assert.ok(
+    isJSONRPCResponse({
+      jsonrpc: "2.0",
+      id: "1",
+      error: { code: -32000, message: "nope" },
+    }),
+  );
+
+  // neither half is not a response either way
+  assert.ok(!isJSONRPCResponse({ jsonrpc: "2.0", id: "1" }));
+  // a malformed error cannot stand in for a result
+  assert.ok(
+    !isJSONRPCResponse({ jsonrpc: "2.0", id: "1", error: { message: "no code" } }),
+  );
+});
+
+test("an error carries its free form data through", () => {
+  const err = { code: -32000, message: "nope", data: { why: "late" } };
+  assert.ok(isErrorData(err));
+  assert.deepEqual(err.data, { why: "late" });
 });

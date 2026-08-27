@@ -4,10 +4,13 @@ import pytest
 
 from ryskV12.client import Env, Rysk, _parse_version
 from ryskV12.models import (
+    ErrorData,
+    JSONRPCResponse,
     Quote,
     Request,
     Transfer,
     TypedDataDomain,
+    is_error_data,
     is_json_rpc_response,
     is_quote,
     is_quote_notification,
@@ -322,6 +325,45 @@ def test_remaining_predicates():
     )
     assert is_json_rpc_response({"jsonrpc": "2.0", "id": "1", "result": {}})
     assert not is_json_rpc_response({"jsonrpc": "2.0", "id": 1, "result": {}})
+    assert is_error_data({"code": -32000, "message": "nope"})
+    assert not is_error_data({"code": "-32000", "message": "nope"})
+    assert not is_error_data({"code": -32000})
     assert is_quote_notification(
         {"rfqId": "1", "assetAddress": ASSET, "chainId": 84532, "newBest": "1", "yours": "1"}
     )
+
+
+def test_a_failed_call_is_still_a_response():
+    """The cli sends error and omits result entirely, so a guard that insists on
+    a well formed result drops every error it reports."""
+    failed = {"jsonrpc": "2.0", "id": "1", "error": {"code": -32000, "message": "nope"}}
+    assert is_json_rpc_response(failed)
+
+    # neither half is not a response either way
+    assert not is_json_rpc_response({"jsonrpc": "2.0", "id": "1"})
+    # a malformed error cannot stand in for a result
+    assert not is_json_rpc_response(
+        {"jsonrpc": "2.0", "id": "1", "error": {"message": "no code"}}
+    )
+
+
+def test_error_survives_from_json():
+    res = JSONRPCResponse.from_json(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "7",
+                "error": {"code": -32000, "message": "nope", "data": {"why": "late"}},
+            }
+        )
+    )
+    assert res.result is None
+    assert res.error == ErrorData(code=-32000, message="nope", data={"why": "late"})
+
+
+def test_a_successful_call_has_no_error():
+    res = JSONRPCResponse.from_json(
+        json.dumps({"jsonrpc": "2.0", "id": "7", "result": {"ok": True}})
+    )
+    assert res.error is None
+    assert res.result == {"ok": True}

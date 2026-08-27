@@ -80,10 +80,23 @@ export type Transfer = {
   nonce: string;
 };
 
+/**
+ * What the CLI reports instead of a result. Mirrors ErrorData in the CLI's
+ * jsonrpc.go; `data` is free form there, so it stays unknown here.
+ */
+export type ErrorData = {
+  code: number;
+  message: string;
+  data?: unknown;
+};
+
 export type JSONRPCResponse = {
   jsonrpc: string;
   id: string;
-  result: Record<string, any> | Array<any> | string;
+  /** absent when the call failed - `error` carries the reason instead */
+  result?: Record<string, any> | Array<any> | string;
+  /** absent when the call succeeded */
+  error?: ErrorData;
 };
 
 export type JSONResponseHandler = (res: JSONRPCResponse) => void;
@@ -163,14 +176,28 @@ export function isTransfer(obj: any): obj is Transfer {
   );
 }
 
-// Type predicate for JSONRPCResponse
+// Type predicate for ErrorData
+export function isErrorData(obj: any): obj is ErrorData {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    typeof obj.code === "number" &&
+    typeof obj.message === "string"
+  );
+}
+
+// Type predicate for JSONRPCResponse.
+//
+// A failed call carries `error` and no `result` at all, so accepting only a
+// well formed result would drop every error the CLI reports.
 export function isJSONRPCResponse(obj: any): obj is JSONRPCResponse {
   return (
     typeof obj === "object" &&
     obj !== null &&
     typeof obj.jsonrpc === "string" &&
     typeof obj.id === "string" &&
-    (typeof obj.result === "object" ||
+    (isErrorData(obj.error) ||
+      typeof obj.result === "object" ||
       Array.isArray(obj.result) ||
       typeof obj.result === "string")
   );

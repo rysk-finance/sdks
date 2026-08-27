@@ -133,10 +133,33 @@ class Transfer:
 
 
 @dataclass(frozen=True)
+class ErrorData:
+    """What the CLI reports instead of a result. Mirrors ErrorData in the CLI's
+    jsonrpc.go; data is free form there, so it stays untyped here."""
+
+    code: int
+    message: str
+    data: Optional[Any] = None
+
+    @staticmethod
+    def from_dict(j: Optional[Dict[str, Any]]) -> Optional["ErrorData"]:
+        if not j:
+            return None
+        return ErrorData(
+            code=j.get("code"),
+            message=j.get("message"),
+            data=j.get("data"),
+        )
+
+
+@dataclass(frozen=True)
 class JSONRPCResponse:
     jsonrpc: Literal["2.0"]
     id: str
-    result: Union[Dict[str, Any], List[Any], str, None]
+    # absent when the call failed - error carries the reason instead
+    result: Union[Dict[str, Any], List[Any], str, None] = None
+    # absent when the call succeeded
+    error: Optional[ErrorData] = None
 
     @staticmethod
     def from_json(data: str) -> "JSONRPCResponse":
@@ -145,6 +168,7 @@ class JSONRPCResponse:
             jsonrpc=j.get("jsonrpc"),
             id=j.get("id"),
             result=j.get("result"),
+            error=ErrorData.from_dict(j.get("error")),
         )
 
 
@@ -228,15 +252,30 @@ def is_transfer(obj: Any) -> bool:
     )
 
 
+def is_error_data(obj: Any) -> bool:
+    """Type predicate for ErrorData."""
+    return (
+        isinstance(obj, dict)
+        and obj is not None
+        and isinstance(obj.get("code"), int)
+        and isinstance(obj.get("message"), str)
+    )
+
+
 def is_json_rpc_response(obj: Any) -> bool:
-    """Type predicate for JSONRPCResponse."""
+    """Type predicate for JSONRPCResponse.
+
+    A failed call carries error and no result at all, so accepting only a well
+    formed result would drop every error the CLI reports.
+    """
     return (
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("jsonrpc"), str)
         and isinstance(obj.get("id"), str)
         and (
-            isinstance(obj.get("result"), dict)
+            is_error_data(obj.get("error"))
+            or isinstance(obj.get("result"), dict)
             or isinstance(obj.get("result"), list)
             or isinstance(obj.get("result"), str)
         )
