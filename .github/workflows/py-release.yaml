@@ -42,6 +42,43 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require a published CLI
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The sdk downloads the newest cli-v* release at install time. If that
+          # is older than the version the sdk demands -- or carries no binaries --
+          # every fresh install is broken, so refuse to publish into that.
+          min=$(sed -n 's/.*_min_sdk_version: str = "\(.*\)".*/\1/p' ryskV12/client.py | head -n 1)
+          [ -n "$min" ] || { echo "::error::could not read the minimum cli version from ryskV12/client.py"; exit 1; }
+
+          releases=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select((.draft or .prerelease) == false) | select(.tag_name | startswith("cli-v"))]')
+
+          newest=$(echo "$releases" | jq -r '.[].tag_name' | sed 's/^cli-v//' | sort -V | tail -n 1)
+          if [ -z "$newest" ]; then
+            echo "::error::no cli-v* release published; run the Release CLI workflow at $min first."
+            exit 1
+          fi
+
+          if [ "$(printf '%s\n%s\n' "$min" "$newest" | sort -V | head -n 1)" != "$min" ]; then
+            echo "::error::newest cli is $newest but this sdk needs $min or newer; release the cli first."
+            exit 1
+          fi
+
+          missing=""
+          assets=$(echo "$releases" | jq -r --arg t "cli-v$newest" '.[] | select(.tag_name == $t) | .assets[].name')
+          for want in ryskV12-linux-amd64 ryskV12-linux-arm64 ryskV12-darwin-amd64 ryskV12-darwin-arm64; do
+            echo "$assets" | grep -qx "$want" || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::cli-v$newest is missing binaries:$missing"
+            exit 1
+          fi
+
+          echo "cli-v$newest satisfies the required $min, with all four binaries."
+
       - name: Build package
         if: steps.check.outputs.exists == 'false'
         run: poetry build
