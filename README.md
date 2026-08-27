@@ -8,6 +8,7 @@ Monorepo for the Rysk V12 client stack: the Go CLI and the SDKs that wrap it.
 | TypeScript SDK | [`packages/ts`](packages/ts) | npm [`ryskv12`](https://www.npmjs.com/package/ryskv12) | `ts-vX.Y.Z` |
 | Python SDK | [`packages/py`](packages/py) | PyPI [`ryskV12`](https://pypi.org/project/ryskV12/) | `py-vX.Y.Z` |
 | Rust SDK | [`packages/rs`](packages/rs) | crates.io `ryskv12` | `rs-vX.Y.Z` |
+| C++ SDK | [`packages/cpp`](packages/cpp) | source, via CMake | `cpp-vX.Y.Z` |
 
 The SDKs do not reimplement the protocol — they spawn the CLI binary and talk
 to it over JSON-RPC on stdio. Published SDK packages download the CLI from this
@@ -22,14 +23,15 @@ SDK that requires it.
 
 ```sh
 make dev-bin     # build the CLI from source into every SDK package
-make build       # build all four packages
+make build       # build all five packages
 make test-py     # python test suite
 make test-rs     # rust test suite
+make test-cpp    # c++ test suite
 make help        # everything else
 ```
 
 `make dev-bin` puts a locally built binary at `packages/ts/ryskV12`,
-`packages/py/ryskV12cli` and `packages/rs/ryskV12` — the paths each SDK's
+`packages/py/ryskV12cli`, `packages/rs/ryskV12` and `packages/cpp/ryskV12` — the paths each SDK's
 examples and integration tests already look in — so they exercise your working
 tree, not a published release. Every SDK's integration tests skip themselves
 when that binary is absent.

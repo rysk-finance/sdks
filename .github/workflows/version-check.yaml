@@ -20,6 +20,8 @@ jobs:
             path: packages/py
           - package: rs
             path: packages/rs
+          - package: cpp
+            path: packages/cpp
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,12 +44,15 @@ jobs:
             case "${{ matrix.package }}" in
               ts) jq -r .version ;;
               py|rs) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
+              # cmake_minimum_required's VERSION is not at the start of a line
+              cpp) sed -n 's/^ *VERSION \([0-9][^ )]*\).*/\1/p' | head -n 1 ;;
             esac
           }
           case "${{ matrix.package }}" in
             ts) manifest="${{ matrix.path }}/package.json" ;;
             py) manifest="${{ matrix.path }}/pyproject.toml" ;;
             rs) manifest="${{ matrix.path }}/Cargo.toml" ;;
+            cpp) manifest="${{ matrix.path }}/CMakeLists.txt" ;;
           esac
 
           base=$(git show "origin/${{ github.base_ref }}:$manifest" | read_version)

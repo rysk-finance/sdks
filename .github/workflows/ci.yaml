@@ -81,6 +81,19 @@ jobs:
       # the integration tests skip themselves without a cli; the integration job runs them
       - run: cargo test
 
+  cpp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cpp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build -j
+      # the cli suite skips itself without a binary; the integration job runs it
+      - run: ctest --test-dir build --output-on-failure
+
   # The SDKs only build argument lists; whether the CLI accepts them is a
   # different question, so this job builds the binary and runs both SDKs against
   # a fake api through it.
@@ -129,3 +142,10 @@ jobs:
       - name: Rust against the cli
         working-directory: packages/rs
         run: cargo test --test cli
+
+      - name: C++ against the cli
+        working-directory: packages/cpp
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure -R cli

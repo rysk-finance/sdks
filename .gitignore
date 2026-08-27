@@ -42,3 +42,7 @@ packages/cli/ryskV12-*
 # Rust
 target/
 /packages/rs/ryskV12
+
+# C++
+/packages/cpp/build/
+/packages/cpp/ryskV12
