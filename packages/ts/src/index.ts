@@ -142,7 +142,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "3.2.0";
+  private _minSdkVersion: string = "4.0.0";
   private _strictVersion: boolean;
 
   /**

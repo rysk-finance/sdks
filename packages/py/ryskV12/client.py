@@ -46,7 +46,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "3.2.0"
+    _min_sdk_version: str = "4.0.0"
 
     def __init__(
         self,
