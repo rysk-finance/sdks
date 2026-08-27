@@ -315,7 +315,7 @@ def test_remaining_predicates():
             "user": MAKER,
             "amount": "1",
             "asset": ASSET,
-            "chain_id": 1,
+            "chainId": 1,
             "isDeposit": True,
             "nonce": "1",
         }

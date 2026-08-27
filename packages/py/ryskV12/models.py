@@ -151,9 +151,6 @@ class JSONRPCResponse:
 JSONResponseHandler = Callable[[JSONRPCResponse], None]
 
 
-from typing import Any, Dict, List, Union
-
-
 def _is_optional(value: Any, expected: type) -> bool:
     """A field the server may not send at all is only checked when it is there."""
     return value is None or isinstance(value, expected)
@@ -212,14 +209,20 @@ def is_quote(obj: Any) -> bool:
 
 
 def is_transfer(obj: Any) -> bool:
-    """Type predicate for Transfer."""
+    """Type predicate for Transfer.
+
+    This checks the shape the CLI puts on the socket, not the Transfer
+    dataclass above: the dataclass mirrors the CLI's snake_case *flags*
+    (--chain_id, --is_deposit), while the JSON the CLI marshals is camelCase.
+    See the struct tags on Transfer in the CLI's types.go.
+    """
     return (
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("user"), str)
         and isinstance(obj.get("amount"), str)
         and isinstance(obj.get("asset"), str)
-        and isinstance(obj.get("chain_id"), int)
+        and isinstance(obj.get("chainId"), int)
         and isinstance(obj.get("isDeposit"), bool)
         and isinstance(obj.get("nonce"), str)
     )

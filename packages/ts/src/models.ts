@@ -83,7 +83,6 @@ export type Transfer = {
 export type JSONRPCResponse = {
   jsonrpc: string;
   id: string;
-  method: string;
   result: Record<string, any> | Array<any> | string;
 };
 
@@ -145,7 +144,12 @@ export function isQuote(obj: any): obj is Quote {
   );
 }
 
-// Type predicate for Transfer
+// Type predicate for Transfer.
+//
+// This checks the shape the CLI puts on the socket, not the `Transfer` above:
+// the SDK type mirrors the CLI's snake_case *flags* (`--chain_id`,
+// `--is_deposit`), while the JSON the CLI marshals is camelCase. See the
+// struct tags on Transfer in the CLI's types.go.
 export function isTransfer(obj: any): obj is Transfer {
   return (
     typeof obj === "object" &&
@@ -153,7 +157,7 @@ export function isTransfer(obj: any): obj is Transfer {
     typeof obj.user === "string" &&
     typeof obj.amount === "string" &&
     typeof obj.asset === "string" &&
-    typeof obj.chain_id === "number" &&
+    typeof obj.chainId === "number" &&
     typeof obj.isDeposit === "boolean" &&
     typeof obj.nonce === "string"
   );

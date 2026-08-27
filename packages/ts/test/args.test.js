@@ -278,7 +278,7 @@ test("the remaining predicates hold", () => {
   assert.ok(isQuote({ ...quote(), signature: "0x00" }));
   assert.ok(!isQuote(quote()), "a quote without a signature is not on the wire yet");
   assert.ok(
-    isTransfer({ user: MAKER, amount: "1", asset: ASSET, chain_id: 1, isDeposit: true, nonce: "1" }),
+    isTransfer({ user: MAKER, amount: "1", asset: ASSET, chainId: 1, isDeposit: true, nonce: "1" }),
   );
   assert.ok(isJSONRPCResponse({ jsonrpc: "2.0", id: "1", result: {} }));
   assert.ok(!isJSONRPCResponse({ jsonrpc: "2.0", id: 1, result: {} }));
