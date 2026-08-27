@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GITHUB_REPO="${RYSK_CLI_REPO:-rysk-finance/ryskV12}"
+GITHUB_REPO="${RYSK_CLI_REPO:-rysk-finance/sdks}"
 CLI_TAG_PREFIX="${RYSK_CLI_TAG_PREFIX:-cli-v}"
 
 # Function to fetch the latest CLI release from GitHub API
