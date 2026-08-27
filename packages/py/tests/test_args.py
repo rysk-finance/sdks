@@ -73,7 +73,7 @@ def test_approve_can_be_told_to_approve_any_erc20(sdk):
 
 def test_no_arg_builder_carries_the_private_key(sdk):
     transfer = Transfer(
-        user=MAKER, amout="1", asset=ASSET, chain_id=84532, is_deposit=True, nonce="1"
+        user=MAKER, amount="1", asset=ASSET, chain_id=84532, is_deposit=True, nonce="1"
     )
     premium_quote = quote(domain=TypedDataDomain(verifyingContract=HANDLER))
 
@@ -313,7 +313,7 @@ def test_remaining_predicates():
     assert is_transfer(
         {
             "user": MAKER,
-            "amout": "1",
+            "amount": "1",
             "asset": ASSET,
             "chain_id": 1,
             "isDeposit": True,

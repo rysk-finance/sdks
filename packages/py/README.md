@@ -90,7 +90,7 @@ from ryskV12.models import Transfer
 
 maker_channel = "maker-channel"
 transfer_details = Transfer(
-    amout="500000",
+    amount="500000",
     asset="0x...",  # The asset address
     chain_id=84532,
     is_deposit=True,

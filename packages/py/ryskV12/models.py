@@ -125,7 +125,7 @@ class QuoteNotification:
 @dataclass(frozen=True)
 class Transfer:
     user: str
-    amout: str
+    amount: str
     asset: str
     chain_id: int
     is_deposit: bool
@@ -217,7 +217,7 @@ def is_transfer(obj: Any) -> bool:
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("user"), str)
-        and isinstance(obj.get("amout"), str)
+        and isinstance(obj.get("amount"), str)
         and isinstance(obj.get("asset"), str)
         and isinstance(obj.get("chain_id"), int)
         and isinstance(obj.get("isDeposit"), bool)

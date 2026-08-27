@@ -205,7 +205,7 @@ class Rysk:
             "--asset",
             transfer.asset,
             "--amount",
-            transfer.amout,
+            transfer.amount,
             "--nonce",
             transfer.nonce,
         ]
