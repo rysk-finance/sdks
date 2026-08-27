@@ -1,6 +1,6 @@
-# ryskV12
+# rysk sdks
 
-Monorepo for the Rysk V12 client stack: the Go CLI and the SDKs that wrap it.
+Monorepo for the Rysk client stack: the Go CLI and the SDKs that wrap it.
 
 | Package | Path | Published as | Release tag |
 | --- | --- | --- | --- |
