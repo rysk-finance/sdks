@@ -18,6 +18,8 @@ jobs:
             path: packages/ts
           - package: py
             path: packages/py
+          - package: rs
+            path: packages/rs
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,12 +41,13 @@ jobs:
           read_version() {
             case "${{ matrix.package }}" in
               ts) jq -r .version ;;
-              py) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
+              py|rs) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
             esac
           }
           case "${{ matrix.package }}" in
             ts) manifest="${{ matrix.path }}/package.json" ;;
             py) manifest="${{ matrix.path }}/pyproject.toml" ;;
+            rs) manifest="${{ matrix.path }}/Cargo.toml" ;;
           esac
 
           base=$(git show "origin/${{ github.base_ref }}:$manifest" | read_version)

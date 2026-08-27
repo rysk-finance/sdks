@@ -1,23 +1,26 @@
 CLI_DIR := packages/cli
 TS_DIR  := packages/ts
 PY_DIR  := packages/py
+RS_DIR  := packages/rs
 
 VERSION ?= dev
 LDFLAGS := -X 'main.Version=$(VERSION)'
 
-.PHONY: help build build-cli build-ts build-py dev-bin install-bin clean test-py
+.PHONY: help build build-cli build-ts build-py build-rs dev-bin install-bin clean test-py test-rs
 
 help:
 	@echo "build      - build every package"
 	@echo "build-cli  - cross-compile the Go CLI for linux/amd64, linux/arm64, darwin/arm64"
 	@echo "build-ts   - tsc the TypeScript SDK"
 	@echo "build-py   - poetry build the Python SDK"
+	@echo "build-rs   - cargo build the Rust SDK"
 	@echo "dev-bin    - build the CLI for this machine and drop it into the SDK packages"
 	@echo "install-bin- drop an already built CLI into the SDK packages"
 	@echo "test-py    - run the Python test suite"
+	@echo "test-rs    - run the Rust test suite"
 	@echo "clean      - remove build output and dev binaries"
 
-build: build-cli build-ts build-py
+build: build-cli build-ts build-py build-rs
 
 build-cli:
 	cd $(CLI_DIR) && VERSION=$(VERSION) ./build.sh
@@ -27,6 +30,9 @@ build-ts:
 
 build-py:
 	cd $(PY_DIR) && poetry build
+
+build-rs:
+	cd $(RS_DIR) && cargo build --release
 
 # Local dev/e2e: the SDKs shell out to a CLI binary next to the package
 # (`./ryskV12` for TS, `./ryskV12cli` for python), which in published packages
@@ -42,12 +48,16 @@ dev-bin:
 install-bin:
 	cp $(CLI_DIR)/ryskV12-dev $(TS_DIR)/ryskV12
 	cp $(CLI_DIR)/ryskV12-dev $(PY_DIR)/ryskV12cli
-	chmod +x $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli
-	@echo "CLI $(VERSION) installed at $(TS_DIR)/ryskV12 and $(PY_DIR)/ryskV12cli"
+	cp $(CLI_DIR)/ryskV12-dev $(RS_DIR)/ryskV12
+	chmod +x $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli $(RS_DIR)/ryskV12
+	@echo "CLI $(VERSION) installed into ts, py and rs"
 
 test-py:
 	cd $(PY_DIR) && poetry run pytest
 
+test-rs:
+	cd $(RS_DIR) && cargo test
+
 clean:
-	rm -f $(CLI_DIR)/ryskV12-* $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli
-	rm -rf $(TS_DIR)/dist $(PY_DIR)/dist
+	rm -f $(CLI_DIR)/ryskV12-* $(TS_DIR)/ryskV12 $(PY_DIR)/ryskV12cli $(RS_DIR)/ryskV12
+	rm -rf $(TS_DIR)/dist $(PY_DIR)/dist $(RS_DIR)/target

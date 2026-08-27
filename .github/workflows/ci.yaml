@@ -63,6 +63,24 @@ jobs:
       - run: poetry run pytest
       - run: poetry build
 
+  rs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/rs
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # the integration tests skip themselves without a cli; the integration job runs them
+      - run: cargo test
+
   # The SDKs only build argument lists; whether the CLI accepts them is a
   # different question, so this job builds the binary and runs both SDKs against
   # a fake api through it.
@@ -79,6 +97,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/rs
 
       - uses: actions/download-artifact@v4
         with:
@@ -103,3 +125,7 @@ jobs:
           pipx install poetry
           poetry install
           poetry run pytest tests/integration -v
+
+      - name: Rust against the cli
+        working-directory: packages/rs
+        run: cargo test --test cli
