@@ -56,6 +56,21 @@ def flag_value(args, flag):
     return args[args.index(flag) + 1]
 
 
+def test_approve_leaves_the_asset_to_the_cli_unless_one_is_given(sdk):
+    fallback = sdk.approve_args(84532, "1", "https://rpc")
+    assert "--asset" not in fallback
+
+    explicit = sdk.approve_args(84532, "1", "https://rpc", ASSET)
+    assert flag_value(explicit, "--asset") == ASSET
+
+
+def test_approve_can_be_told_to_approve_any_erc20(sdk):
+    other = "0x1111111111111111111111111111111111111111"
+    args = sdk.approve_args(84532, "1", "https://rpc", other)
+    assert flag_value(args, "--asset") == other
+    assert flag_value(args, "--amount") == "1"
+
+
 def test_no_arg_builder_carries_the_private_key(sdk):
     transfer = Transfer(
         user=MAKER, amout="1", asset=ASSET, chain_id=84532, is_deposit=True, nonce="1"

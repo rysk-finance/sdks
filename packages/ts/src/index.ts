@@ -2,7 +2,7 @@ import { ChildProcess, exec, spawn } from "child_process";
 import { EventEmitter } from "events";
 import Stream from "stream";
 
-import { Quote, Transfer } from "./models";
+import { HexString, Quote, Transfer } from "./models";
 
 enum ReadyState {
   CONNECTING = 0,
@@ -225,7 +225,16 @@ class Rysk {
     return ["disconnect", "--channel_id", channelId];
   }
 
-  public approveArgs(chainId: number, amount: string, rpcURL: string) {
+  /**
+   * @param asset erc20 to approve. Left out, the cli falls back to the chain's
+   * strike asset, which is what every caller got before this was accepted.
+   */
+  public approveArgs(
+    chainId: number,
+    amount: string,
+    rpcURL: string,
+    asset?: HexString,
+  ) {
     return [
       "approve",
       "--chain_id",
@@ -234,6 +243,7 @@ class Rysk {
       amount,
       "--rpc_url",
       rpcURL,
+      ...(asset ? ["--asset", asset] : []),
     ];
   }
 

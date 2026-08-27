@@ -81,7 +81,9 @@ const makerChannel = "maker-channel";
 ryskSDK.execute(ryskSDK.disconnectArgs(makerChannel));
 ```
 
-### Approve USDC spending
+### Approve spending
+
+Omit the asset and the chain's strike asset is approved, as before:
 
 ```ts
 const chainId = 84532;
@@ -89,6 +91,14 @@ const amount = "1000000";
 const rpcURL = "https://rpc...";
 
 const proc = ryskSDK.execute(ryskSDK.approveArgs(chainId, amount, rpcURL));
+```
+
+Pass one to approve any other erc20:
+
+```ts
+const proc = ryskSDK.execute(
+  ryskSDK.approveArgs(chainId, amount, rpcURL, "0xabc..."),
+);
 ```
 
 ### List USDC Balances

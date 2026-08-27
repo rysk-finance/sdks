@@ -54,7 +54,9 @@ uri = "/rfqs/0x..."  # Example websocket endpoint (replace with actual asset add
 proc = rysk_sdk.execute_async(rysk_sdk.connect_args(channel_id, uri), response_handler)
 ```
 
-### Approve USDC Spending
+### Approve Spending
+
+Omit the asset and the chain's strike asset is approved, as before:
 
 ```python
 chain_id = 84532
@@ -62,6 +64,14 @@ amount = "1000000"
 rpc_url= "https://rpc..."
 
 proc = rysk_sdk.execute(rysk_sdk.approve_args(chain_id, amount, rpc_url))
+```
+
+Pass one to approve any other erc20:
+
+```python
+proc = rysk_sdk.execute(
+    rysk_sdk.approve_args(chain_id, amount, rpc_url, "0xabc...")
+)
 ```
 
 ### List USDC Balances

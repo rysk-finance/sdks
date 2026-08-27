@@ -45,6 +45,23 @@ const quote = (extra = {}) => ({
 
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
 
+test("approve leaves the asset to the cli unless one is given", () => {
+  const rysk = sdk();
+
+  const fallback = rysk.approveArgs(84532, "1", "https://rpc");
+  assert.ok(!fallback.includes("--asset"), "an absent asset must not reach the cli");
+
+  const explicit = rysk.approveArgs(84532, "1", "https://rpc", ASSET);
+  assert.equal(flagValue(explicit, "--asset"), ASSET);
+});
+
+test("approve can be told to approve any erc20", () => {
+  const other = "0x1111111111111111111111111111111111111111";
+  const args = sdk().approveArgs(84532, "1", "https://rpc", other);
+  assert.equal(flagValue(args, "--asset"), other);
+  assert.equal(flagValue(args, "--amount"), "1");
+});
+
 test("no arg builder carries the private key", () => {
   const rysk = sdk();
   const builders = [
