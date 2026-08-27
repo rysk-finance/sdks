@@ -1,11 +1,7 @@
 name: Release Python SDK
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/py/**"
-      - ".github/workflows/py-release.yaml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -36,17 +33,14 @@ jobs:
         id: v
         run: echo "version=$(poetry version --short)" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if already released
-        id: check
+      - name: Refuse to republish a version
         run: |
           if git rev-parse -q --verify "refs/tags/py-v${{ steps.v.outputs.version }}" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::error::py-v${{ steps.v.outputs.version }} is already released; bump pyproject.toml first."
+            exit 1
           fi
 
       - name: Require a published CLI
-        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -83,11 +77,9 @@ jobs:
           echo "cli-v$newest satisfies the required $min, with all four binaries."
 
       - name: Build package
-        if: steps.check.outputs.exists == 'false'
         run: poetry build
 
       - name: Create release
-        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: py-v${{ steps.v.outputs.version }}
@@ -98,7 +90,6 @@ jobs:
       # short lived pypi credential. The trusted publisher on pypi must name
       # this repo, this workflow file, and the pypi environment below.
       - name: Upload to PyPI
-        if: steps.check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/py/dist

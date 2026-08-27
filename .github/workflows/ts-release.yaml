@@ -1,11 +1,7 @@
 name: Release TS SDK
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/ts/**"
-      - ".github/workflows/ts-release.yaml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -38,17 +35,14 @@ jobs:
         id: v
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if already released
-        id: check
+      - name: Refuse to republish a version
         run: |
           if git rev-parse -q --verify "refs/tags/ts-v${{ steps.v.outputs.version }}" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::error::ts-v${{ steps.v.outputs.version }} is already released; bump package.json first."
+            exit 1
           fi
 
       - name: Require a published CLI
-        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -85,13 +79,11 @@ jobs:
           echo "cli-v$newest satisfies the required $min, with all four binaries."
 
       - name: Install and build
-        if: steps.check.outputs.exists == 'false'
         run: |
           yarn install --frozen-lockfile --ignore-scripts
           yarn build
 
       - name: Create release
-        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ts-v${{ steps.v.outputs.version }}
@@ -101,5 +93,4 @@ jobs:
       # No NODE_AUTH_TOKEN: npm mints a short lived credential from the oidc
       # token, and attaches a provenance attestation while it is at it.
       - name: Publish to NPM
-        if: steps.check.outputs.exists == 'false'
         run: npm publish --access public
