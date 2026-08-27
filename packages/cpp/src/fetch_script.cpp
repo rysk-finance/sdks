@@ -1,4 +1,8 @@
-#!/bin/bash
+#include "ryskv12/fetch_script.hpp"
+
+namespace ryskv12 {
+
+const char* const kFetchScript = R"SCRIPT(#!/bin/bash
 
 GITHUB_REPO="${RYSK_CLI_REPO:-rysk-finance/sdks}"
 CLI_TAG_PREFIX="${RYSK_CLI_TAG_PREFIX:-cli-v}"
@@ -80,4 +84,6 @@ main() {
   fi
 }
 
-main
+main)SCRIPT";
+
+}  // namespace ryskv12

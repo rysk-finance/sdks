@@ -1,14 +1,13 @@
 name: Release TS SDK
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/ts/**"
-      - ".github/workflows/ts-release.yaml"
+  workflow_dispatch:
 
 permissions:
   contents: write
+  # trusted publishing: the registry verifies this workflow's oidc
+  # token instead of a long lived api token.
+  id-token: write
 
 jobs:
   release_and_publish:
@@ -19,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -26,35 +26,71 @@ jobs:
           node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
 
+      # trusted publishing landed in npm 11.5.1; the lts node line still ships
+      # an older npm, so the bundled one cannot exchange the oidc token.
+      - name: Use an npm that can publish with oidc
+        run: npm install -g npm@latest
+
       - name: Get current version
         id: v
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Skip if already released
-        id: check
+      - name: Refuse to republish a version
         run: |
           if git rev-parse -q --verify "refs/tags/ts-v${{ steps.v.outputs.version }}" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::error::ts-v${{ steps.v.outputs.version }} is already released; bump package.json first."
+            exit 1
           fi
 
+      - name: Require a published CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The sdk downloads the newest cli-v* release at install time. If that
+          # is older than the version the sdk demands -- or carries no binaries --
+          # every fresh install is broken, so refuse to publish into that.
+          min=$(sed -n 's/.*_minSdkVersion: string = "\(.*\)".*/\1/p' src/index.ts | head -n 1)
+          [ -n "$min" ] || { echo "::error::could not read the minimum cli version from src/index.ts"; exit 1; }
+
+          releases=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select((.draft or .prerelease) == false) | select(.tag_name | startswith("cli-v"))]')
+
+          newest=$(echo "$releases" | jq -r '.[].tag_name' | sed 's/^cli-v//' | sort -V | tail -n 1)
+          if [ -z "$newest" ]; then
+            echo "::error::no cli-v* release published; run the Release CLI workflow at $min first."
+            exit 1
+          fi
+
+          if [ "$(printf '%s\n%s\n' "$min" "$newest" | sort -V | head -n 1)" != "$min" ]; then
+            echo "::error::newest cli is $newest but this sdk needs $min or newer; release the cli first."
+            exit 1
+          fi
+
+          missing=""
+          assets=$(echo "$releases" | jq -r --arg t "cli-v$newest" '.[] | select(.tag_name == $t) | .assets[].name')
+          for want in ryskV12-linux-amd64 ryskV12-linux-arm64 ryskV12-darwin-amd64 ryskV12-darwin-arm64; do
+            echo "$assets" | grep -qx "$want" || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::cli-v$newest is missing binaries:$missing"
+            exit 1
+          fi
+
+          echo "cli-v$newest satisfies the required $min, with all four binaries."
+
       - name: Install and build
-        if: steps.check.outputs.exists == 'false'
         run: |
           yarn install --frozen-lockfile --ignore-scripts
           yarn build
 
       - name: Create release
-        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ts-v${{ steps.v.outputs.version }}
           name: TS SDK v${{ steps.v.outputs.version }}
           target_commitish: main
 
+      # No NODE_AUTH_TOKEN: npm mints a short lived credential from the oidc
+      # token, and attaches a provenance attestation while it is at it.
       - name: Publish to NPM
-        if: steps.check.outputs.exists == 'false'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

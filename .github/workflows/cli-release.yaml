@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "CLI version, without prefix (e.g. 3.0.4)"
+        description: "CLI version, without prefix (e.g. 4.0.0)"
         required: true
         type: string
 

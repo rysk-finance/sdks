@@ -46,7 +46,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "3.2.0"
+    _min_sdk_version: str = "4.0.0"
 
     def __init__(
         self,
@@ -171,8 +171,13 @@ class Rysk:
     def disconnect_args(self, channel_id: str):
         return ["disconnect", "--channel_id", channel_id]
 
-    def approve_args(self, chain_id: int, amount: str, rpc_url: str):
-        return [
+    def approve_args(
+        self, chain_id: int, amount: str, rpc_url: str, asset: Optional[str] = None
+    ):
+        """asset is the erc20 to approve. Left out, the CLI falls back to the
+        chain's strike asset, which is what every caller got before this was
+        accepted."""
+        base = [
             "approve",
             "--chain_id",
             str(chain_id),
@@ -181,6 +186,9 @@ class Rysk:
             "--rpc_url",
             rpc_url,
         ]
+        if asset:
+            base += ["--asset", asset]
+        return base
 
     def balances_args(self, channel_id: str, account: str):
         return ["balances", "--channel_id", channel_id, "--account", account]
@@ -197,7 +205,7 @@ class Rysk:
             "--asset",
             transfer.asset,
             "--amount",
-            transfer.amout,
+            transfer.amount,
             "--nonce",
             transfer.nonce,
         ]

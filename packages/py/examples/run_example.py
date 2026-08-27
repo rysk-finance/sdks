@@ -20,6 +20,7 @@ from ryskV12.nonce import NonceCounter
 from ryskV12.models import (
     Quote,
     Request,
+    is_error_data,
     is_json_rpc_response,
     is_quote_notification,
     is_request,
@@ -90,6 +91,11 @@ def handle_maker_message(payload: bytes) -> None:
 
     # A quote notification tells you where your price stands, so it is the cue to
     # re-quote rather than wait.
+    # An error arrives instead of a result, so it has to be read before anything
+    # reaches for one.
+    if is_json_rpc_response(message) and is_error_data(message.get("error")):
+        print(f"maker rpc {message['id']} failed: {message['error']['message']}")
+        return
     if is_json_rpc_response(message) and is_quote_notification(message.get("result")):
         result = message["result"]
         print(f"rfq {result['rfqId']}: best {result['newBest']}, yours {result['yours']}")
@@ -103,6 +109,9 @@ def handle_rfq_message(payload: bytes) -> None:
         return
     try:
         message = json.loads(text)
+        if is_json_rpc_response(message) and is_error_data(message.get("error")):
+            print(f"rfq rpc {message['id']} failed: {message['error']['message']}")
+            return
         if not is_json_rpc_response(message) or not is_request(message.get("result")):
             return
         request = Request.from_json(json.dumps(message["result"]))

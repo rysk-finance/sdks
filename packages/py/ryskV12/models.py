@@ -125,7 +125,7 @@ class QuoteNotification:
 @dataclass(frozen=True)
 class Transfer:
     user: str
-    amout: str
+    amount: str
     asset: str
     chain_id: int
     is_deposit: bool
@@ -133,10 +133,33 @@ class Transfer:
 
 
 @dataclass(frozen=True)
+class ErrorData:
+    """What the CLI reports instead of a result. Mirrors ErrorData in the CLI's
+    jsonrpc.go; data is free form there, so it stays untyped here."""
+
+    code: int
+    message: str
+    data: Optional[Any] = None
+
+    @staticmethod
+    def from_dict(j: Optional[Dict[str, Any]]) -> Optional["ErrorData"]:
+        if not j:
+            return None
+        return ErrorData(
+            code=j.get("code"),
+            message=j.get("message"),
+            data=j.get("data"),
+        )
+
+
+@dataclass(frozen=True)
 class JSONRPCResponse:
     jsonrpc: Literal["2.0"]
     id: str
-    result: Union[Dict[str, Any], List[Any], str, None]
+    # absent when the call failed - error carries the reason instead
+    result: Union[Dict[str, Any], List[Any], str, None] = None
+    # absent when the call succeeded
+    error: Optional[ErrorData] = None
 
     @staticmethod
     def from_json(data: str) -> "JSONRPCResponse":
@@ -145,13 +168,11 @@ class JSONRPCResponse:
             jsonrpc=j.get("jsonrpc"),
             id=j.get("id"),
             result=j.get("result"),
+            error=ErrorData.from_dict(j.get("error")),
         )
 
 
 JSONResponseHandler = Callable[[JSONRPCResponse], None]
-
-
-from typing import Any, Dict, List, Union
 
 
 def _is_optional(value: Any, expected: type) -> bool:
@@ -212,28 +233,49 @@ def is_quote(obj: Any) -> bool:
 
 
 def is_transfer(obj: Any) -> bool:
-    """Type predicate for Transfer."""
+    """Type predicate for Transfer.
+
+    This checks the shape the CLI puts on the socket, not the Transfer
+    dataclass above: the dataclass mirrors the CLI's snake_case *flags*
+    (--chain_id, --is_deposit), while the JSON the CLI marshals is camelCase.
+    See the struct tags on Transfer in the CLI's types.go.
+    """
     return (
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("user"), str)
-        and isinstance(obj.get("amout"), str)
+        and isinstance(obj.get("amount"), str)
         and isinstance(obj.get("asset"), str)
-        and isinstance(obj.get("chain_id"), int)
+        and isinstance(obj.get("chainId"), int)
         and isinstance(obj.get("isDeposit"), bool)
         and isinstance(obj.get("nonce"), str)
     )
 
 
+def is_error_data(obj: Any) -> bool:
+    """Type predicate for ErrorData."""
+    return (
+        isinstance(obj, dict)
+        and obj is not None
+        and isinstance(obj.get("code"), int)
+        and isinstance(obj.get("message"), str)
+    )
+
+
 def is_json_rpc_response(obj: Any) -> bool:
-    """Type predicate for JSONRPCResponse."""
+    """Type predicate for JSONRPCResponse.
+
+    A failed call carries error and no result at all, so accepting only a well
+    formed result would drop every error the CLI reports.
+    """
     return (
         isinstance(obj, dict)
         and obj is not None
         and isinstance(obj.get("jsonrpc"), str)
         and isinstance(obj.get("id"), str)
         and (
-            isinstance(obj.get("result"), dict)
+            is_error_data(obj.get("error"))
+            or isinstance(obj.get("result"), dict)
             or isinstance(obj.get("result"), list)
             or isinstance(obj.get("result"), str)
         )

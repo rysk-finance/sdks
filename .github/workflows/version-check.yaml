@@ -1,11 +1,11 @@
 name: Check version bump
 
+# No paths filter on purpose: this is a required status check, and a check that
+# never runs blocks the pr forever. The job detects the changed package itself
+# and passes trivially when neither sdk was touched.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "packages/ts/**"
-      - "packages/py/**"
 
 jobs:
   check:
@@ -18,6 +18,10 @@ jobs:
             path: packages/ts
           - package: py
             path: packages/py
+          - package: rs
+            path: packages/rs
+          - package: cpp
+            path: packages/cpp
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,12 +43,16 @@ jobs:
           read_version() {
             case "${{ matrix.package }}" in
               ts) jq -r .version ;;
-              py) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
+              py|rs) sed -n 's/^version *= *"\(.*\)"/\1/p' | head -n 1 ;;
+              # cmake_minimum_required's VERSION is not at the start of a line
+              cpp) sed -n 's/^ *VERSION \([0-9][^ )]*\).*/\1/p' | head -n 1 ;;
             esac
           }
           case "${{ matrix.package }}" in
             ts) manifest="${{ matrix.path }}/package.json" ;;
             py) manifest="${{ matrix.path }}/pyproject.toml" ;;
+            rs) manifest="${{ matrix.path }}/Cargo.toml" ;;
+            cpp) manifest="${{ matrix.path }}/CMakeLists.txt" ;;
           esac
 
           base=$(git show "origin/${{ github.base_ref }}:$manifest" | read_version)

@@ -80,11 +80,23 @@ export type Transfer = {
   nonce: string;
 };
 
+/**
+ * What the CLI reports instead of a result. Mirrors ErrorData in the CLI's
+ * jsonrpc.go; `data` is free form there, so it stays unknown here.
+ */
+export type ErrorData = {
+  code: number;
+  message: string;
+  data?: unknown;
+};
+
 export type JSONRPCResponse = {
   jsonrpc: string;
   id: string;
-  method: string;
-  result: Record<string, any> | Array<any> | string;
+  /** absent when the call failed - `error` carries the reason instead */
+  result?: Record<string, any> | Array<any> | string;
+  /** absent when the call succeeded */
+  error?: ErrorData;
 };
 
 export type JSONResponseHandler = (res: JSONRPCResponse) => void;
@@ -145,7 +157,12 @@ export function isQuote(obj: any): obj is Quote {
   );
 }
 
-// Type predicate for Transfer
+// Type predicate for Transfer.
+//
+// This checks the shape the CLI puts on the socket, not the `Transfer` above:
+// the SDK type mirrors the CLI's snake_case *flags* (`--chain_id`,
+// `--is_deposit`), while the JSON the CLI marshals is camelCase. See the
+// struct tags on Transfer in the CLI's types.go.
 export function isTransfer(obj: any): obj is Transfer {
   return (
     typeof obj === "object" &&
@@ -153,20 +170,34 @@ export function isTransfer(obj: any): obj is Transfer {
     typeof obj.user === "string" &&
     typeof obj.amount === "string" &&
     typeof obj.asset === "string" &&
-    typeof obj.chain_id === "number" &&
+    typeof obj.chainId === "number" &&
     typeof obj.isDeposit === "boolean" &&
     typeof obj.nonce === "string"
   );
 }
 
-// Type predicate for JSONRPCResponse
+// Type predicate for ErrorData
+export function isErrorData(obj: any): obj is ErrorData {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    typeof obj.code === "number" &&
+    typeof obj.message === "string"
+  );
+}
+
+// Type predicate for JSONRPCResponse.
+//
+// A failed call carries `error` and no `result` at all, so accepting only a
+// well formed result would drop every error the CLI reports.
 export function isJSONRPCResponse(obj: any): obj is JSONRPCResponse {
   return (
     typeof obj === "object" &&
     obj !== null &&
     typeof obj.jsonrpc === "string" &&
     typeof obj.id === "string" &&
-    (typeof obj.result === "object" ||
+    (isErrorData(obj.error) ||
+      typeof obj.result === "object" ||
       Array.isArray(obj.result) ||
       typeof obj.result === "string")
   );

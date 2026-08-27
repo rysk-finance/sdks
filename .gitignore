@@ -38,3 +38,11 @@ packages/cli/ryskV12-*
 # (packages/py/ryskV12 is the python package itself, hence the exact names)
 /packages/ts/ryskV12
 /packages/py/ryskV12cli
+
+# Rust
+target/
+/packages/rs/ryskV12
+
+# C++
+/packages/cpp/build/
+/packages/cpp/ryskV12

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import Rysk, { Env, NonceCounter } from "../dist/index.js";
 import {
+  isErrorData,
   isJSONRPCResponse,
   isQuote,
   isQuoteNotification,
@@ -44,6 +45,23 @@ const quote = (extra = {}) => ({
 });
 
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
+
+test("approve leaves the asset to the cli unless one is given", () => {
+  const rysk = sdk();
+
+  const fallback = rysk.approveArgs(84532, "1", "https://rpc");
+  assert.ok(!fallback.includes("--asset"), "an absent asset must not reach the cli");
+
+  const explicit = rysk.approveArgs(84532, "1", "https://rpc", ASSET);
+  assert.equal(flagValue(explicit, "--asset"), ASSET);
+});
+
+test("approve can be told to approve any erc20", () => {
+  const other = "0x1111111111111111111111111111111111111111";
+  const args = sdk().approveArgs(84532, "1", "https://rpc", other);
+  assert.equal(flagValue(args, "--asset"), other);
+  assert.equal(flagValue(args, "--amount"), "1");
+});
 
 test("no arg builder carries the private key", () => {
   const rysk = sdk();
@@ -261,10 +279,13 @@ test("the remaining predicates hold", () => {
   assert.ok(isQuote({ ...quote(), signature: "0x00" }));
   assert.ok(!isQuote(quote()), "a quote without a signature is not on the wire yet");
   assert.ok(
-    isTransfer({ user: MAKER, amount: "1", asset: ASSET, chain_id: 1, isDeposit: true, nonce: "1" }),
+    isTransfer({ user: MAKER, amount: "1", asset: ASSET, chainId: 1, isDeposit: true, nonce: "1" }),
   );
   assert.ok(isJSONRPCResponse({ jsonrpc: "2.0", id: "1", result: {} }));
   assert.ok(!isJSONRPCResponse({ jsonrpc: "2.0", id: 1, result: {} }));
+  assert.ok(isErrorData({ code: -32000, message: "nope" }));
+  assert.ok(!isErrorData({ code: "-32000", message: "nope" }));
+  assert.ok(!isErrorData({ code: -32000 }));
   assert.ok(
     isQuoteNotification({
       rfqId: "1",
@@ -274,4 +295,29 @@ test("the remaining predicates hold", () => {
       yours: "1",
     }),
   );
+});
+
+test("a failed call is still a response", () => {
+  // The cli sends error and omits result entirely, so a guard that insists on a
+  // well formed result drops every error it reports.
+  assert.ok(
+    isJSONRPCResponse({
+      jsonrpc: "2.0",
+      id: "1",
+      error: { code: -32000, message: "nope" },
+    }),
+  );
+
+  // neither half is not a response either way
+  assert.ok(!isJSONRPCResponse({ jsonrpc: "2.0", id: "1" }));
+  // a malformed error cannot stand in for a result
+  assert.ok(
+    !isJSONRPCResponse({ jsonrpc: "2.0", id: "1", error: { message: "no code" } }),
+  );
+});
+
+test("an error carries its free form data through", () => {
+  const err = { code: -32000, message: "nope", data: { why: "late" } };
+  assert.ok(isErrorData(err));
+  assert.deepEqual(err.data, { why: "late" });
 });

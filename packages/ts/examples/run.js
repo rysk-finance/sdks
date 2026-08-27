@@ -8,6 +8,7 @@
 //   node examples/run.js
 import Rysk, { Env, NonceCounter } from "ryskv12";
 import {
+  isErrorData,
   isJSONRPCResponse,
   isQuoteNotification,
   isRequest,
@@ -73,6 +74,12 @@ const main = () => {
 
     try {
       const message = JSON.parse(payload);
+      // An error arrives instead of a result, so it has to be read before
+      // anything reaches for one.
+      if (isJSONRPCResponse(message) && isErrorData(message.error)) {
+        console.error(`maker rpc ${message.id} failed: ${message.error.message}`);
+        return;
+      }
       // A quote notification tells you where your price stands, so it is the cue
       // to re-quote rather than wait.
       if (isJSONRPCResponse(message) && isQuoteNotification(message.result)) {
@@ -104,6 +111,10 @@ const main = () => {
 
     try {
       const message = JSON.parse(payload);
+      if (isJSONRPCResponse(message) && isErrorData(message.error)) {
+        console.error(`rfq rpc ${message.id} failed: ${message.error.message}`);
+        return;
+      }
       if (!isJSONRPCResponse(message) || !isRequest(message.result)) return;
       console.log(`rfq ${message.id}: ${message.result.quantity} @ ${message.result.strike}`);
       quote(message.id, message.result);

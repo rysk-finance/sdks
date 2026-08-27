@@ -16,9 +16,22 @@ jobs:
         with:
           go-version-file: packages/cli/go.mod
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
-      - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+      # The integration job runs the sdks against this same binary. Building it
+      # here and passing it along keeps go-ethereum from being compiled a second
+      # time, on a second runner, from a cold cache.
+      - name: Build the cli
+        working-directory: ${{ github.workspace }}
+        run: make dev-bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-dev
+          path: packages/cli/ryskV12-dev
+          retention-days: 1
+          if-no-files-found: error
 
   ts:
     runs-on: ubuntu-latest
@@ -50,25 +63,68 @@ jobs:
       - run: poetry run pytest
       - run: poetry build
 
+  rs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/rs
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # the integration tests skip themselves without a cli; the integration job runs them
+      - run: cargo test
+
+  cpp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cpp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build -j
+      # the cli suite skips itself without a binary; the integration job runs it
+      - run: ctest --test-dir build --output-on-failure
+
   # The SDKs only build argument lists; whether the CLI accepts them is a
   # different question, so this job builds the binary and runs both SDKs against
   # a fake api through it.
   integration:
     runs-on: ubuntu-latest
+    # for the binary the cli job built; there is nothing to integrate against
+    # if the cli does not compile anyway.
+    needs: cli
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: packages/cli/go.mod
       - uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/rs
 
-      - name: Build the cli into both packages
-        run: make dev-bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-dev
+          path: packages/cli
+
+      - name: Put the cli where both sdks look for it
+        run: |
+          # artifacts do not carry the exec bit
+          chmod +x packages/cli/ryskV12-dev
+          make install-bin
 
       - name: TypeScript against the cli
         working-directory: packages/ts
@@ -82,3 +138,14 @@ jobs:
           pipx install poetry
           poetry install
           poetry run pytest tests/integration -v
+
+      - name: Rust against the cli
+        working-directory: packages/rs
+        run: cargo test --test cli
+
+      - name: C++ against the cli
+        working-directory: packages/cpp
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure -R cli
