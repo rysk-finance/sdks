@@ -9,6 +9,9 @@ on:
 
 permissions:
   contents: write
+  # trusted publishing: the registry verifies this workflow's oidc
+  # token instead of a long lived api token.
+  id-token: write
 
 jobs:
   release_and_publish:
@@ -91,10 +94,11 @@ jobs:
           name: Python SDK v${{ steps.v.outputs.version }}
           target_commitish: main
 
+      # No user/password: the action exchanges this job's oidc token for a
+      # short lived pypi credential. The trusted publisher on pypi must name
+      # this repo, this workflow file, and the pypi environment below.
       - name: Upload to PyPI
         if: steps.check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: packages/py/dist
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}

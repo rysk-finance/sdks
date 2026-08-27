@@ -9,6 +9,9 @@ on:
 
 permissions:
   contents: write
+  # trusted publishing: the registry verifies this workflow's oidc
+  # token instead of a long lived api token.
+  id-token: write
 
 jobs:
   release_and_publish:
@@ -25,6 +28,11 @@ jobs:
         with:
           node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
+
+      # trusted publishing landed in npm 11.5.1; the lts node line still ships
+      # an older npm, so the bundled one cannot exchange the oidc token.
+      - name: Use an npm that can publish with oidc
+        run: npm install -g npm@latest
 
       - name: Get current version
         id: v
@@ -90,8 +98,8 @@ jobs:
           name: TS SDK v${{ steps.v.outputs.version }}
           target_commitish: main
 
+      # No NODE_AUTH_TOKEN: npm mints a short lived credential from the oidc
+      # token, and attaches a provenance attestation while it is at it.
       - name: Publish to NPM
         if: steps.check.outputs.exists == 'false'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
