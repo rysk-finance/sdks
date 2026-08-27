@@ -1,11 +1,11 @@
 name: Check version bump
 
+# No paths filter on purpose: this is a required status check, and a check that
+# never runs blocks the pr forever. The job detects the changed package itself
+# and passes trivially when neither sdk was touched.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "packages/ts/**"
-      - "packages/py/**"
 
 jobs:
   check:
