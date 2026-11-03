@@ -1,6 +1,6 @@
 {
   "name": "ryskv12",
-  "version": "4.0.0",
+  "version": "5.1.0",
   "description": "Rysk V12 client",
   "repository": {
     "type": "git",
@@ -45,7 +45,7 @@
   "scripts": {
     "build": "npx tsc",
     "upgrade": "yarn upgrade-interactive --latest",
-    "postinstall": "chmod +x scripts/* && ./scripts/fetch_latest_release.sh",
+    "postinstall": "chmod +x scripts/* && (./scripts/fetch_latest_release.sh || echo 'ryskv12: could not download the cli; run scripts/fetch_latest_release.sh, or set the cli path yourself')",
     "pretest": "npx tsc",
     "test": "node --test 'test/*.test.js'"
   },

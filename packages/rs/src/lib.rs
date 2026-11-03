@@ -10,7 +10,7 @@ mod error;
 mod models;
 mod nonce;
 
-pub use client::{Env, Rysk, RELEASES_URL};
+pub use client::{send, Env, Rysk, RELEASES_URL};
 pub use error::Error;
 pub use models::{
     ChainId, ErrorData, JsonRpcResponse, Quote, QuoteNotification, Request, Transfer,

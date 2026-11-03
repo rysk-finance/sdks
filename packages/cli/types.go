@@ -37,3 +37,12 @@ type QuoteNotification struct {
 	NewBest   string `json:"newBest"`
 	Yours     string `json:"yours"`
 }
+
+type WillRedeem struct {
+	Account    string `json:"account"`
+	Otoken     string `json:"otoken"`
+	ChainID    int    `json:"chainId"`
+	WillRedeem bool   `json:"willRedeem"`
+	Nonce      string `json:"nonce"`
+	Signature  string `json:"signature"`
+}

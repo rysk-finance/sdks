@@ -3,62 +3,54 @@ package main
 import (
 	"fmt"
 	"time"
-
-	"github.com/urfave/cli/v2"
 )
 
-var transferAction = &cli.Command{
+var transferAction = &Command{
 	Name:  "transfer",
 	Usage: "request a transfer",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "channel_id",
-			Required: true,
-			Usage:    "the socket id to send messages into",
-		},
-		&cli.Int64Flag{
+	Flags: []Flag{
+		&Int64Flag{
 			Name:     "chain_id",
 			Required: true,
 			Usage:    "chain_id",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "asset",
 			Required: true,
 			Usage:    "asset address",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "user",
 			Required: true,
 			Usage:    "user address",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "amount",
 			Required: true,
 			Usage:    "amount to deposit",
 		},
-		&cli.BoolFlag{
+		&BoolFlag{
 			Name:  "is_deposit",
 			Usage: "whether you want to deposit or withdraw",
 		},
-		&cli.Uint64Flag{
+		&Uint64Flag{
 			Name:     "nonce",
 			Required: true,
 			Usage:    "nonce to sign the message with",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key to sign messages with",
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return transfer(c)
 	},
 }
 
-func transfer(c *cli.Context) error {
-	channelID := c.String("channel_id")
+func transfer(c *Context) error {
 	method := "withdraw"
 	if c.Bool("is_deposit") {
 		method = "deposit"
@@ -89,5 +81,5 @@ func transfer(c *cli.Context) error {
 	}
 	t.Signature = sig
 	payload.Params = t
-	return writeToSocket(channelID, payload)
+	return send(payload)
 }

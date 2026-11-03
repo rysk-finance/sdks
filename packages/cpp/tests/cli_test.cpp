@@ -17,12 +17,16 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <optional>
+#include <regex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "harness.hpp"
 #include "ryskv12/client.hpp"
+#include "ryskv12/json.hpp"
 
 using namespace ryskv12;
 
@@ -80,6 +84,18 @@ static Quote quote() {
   domain.verifying_contract = HANDLER;
   q.domain = domain;
   return q;
+}
+
+/// Writes a batch of the one quote to `path` and returns the args that post it.
+static std::vector<std::string> post_one(const Rysk& rysk, const std::string& path,
+                                         const std::string& request_id, const Quote& q,
+                                         const std::string& url) {
+  std::ofstream(path) << rysk.premium_quote_batch({{request_id, q}});
+  return rysk.premium_quote_batch_args(path, url);
+}
+
+static std::string scratch_path(const char* name) {
+  return "/tmp/rysk-cpp-" + std::string(name) + "-" + std::to_string(::getpid()) + ".json";
 }
 
 struct Call {
@@ -224,7 +240,9 @@ TEST(the_cli_signs_and_posts_what_the_sdk_built) {
   FakeApi api(FakeApi::json_ok(R"({"failures":[]})"));
   Rysk rysk = sdk();
 
-  Output out = rysk.run(rysk.premium_quote_args("req-1", quote(), api.url()));
+  std::string path = scratch_path("quote");
+  Output out = rysk.run(post_one(rysk, path, "req-1", quote(), api.url()));
+  ::unlink(path.c_str());
   CHECK_MSG(out.exit_code == 0, out.err);
   CHECK_EQ(trimmed(out.out), std::string(R"({"failures":[]})"));
 
@@ -270,7 +288,7 @@ TEST(a_batch_is_one_call) {
     entries.emplace_back("req-" + std::to_string(i), q);
   }
 
-  std::string path = "/tmp/rysk-cpp-batch-" + std::to_string(::getpid()) + ".json";
+  std::string path = scratch_path("batch");
   {
     std::ofstream file(path);
     file << rysk.premium_quote_batch(entries);
@@ -294,7 +312,9 @@ TEST(a_rejected_quote_fails_the_command) {
   FakeApi api(FakeApi::json_ok(R"({"failures":[{"error":"request expired","quote":{}}]})"));
   Rysk rysk = sdk();
 
-  Output out = rysk.run(rysk.premium_quote_args("req-1", quote(), api.url()));
+  std::string path = scratch_path("rejected");
+  Output out = rysk.run(post_one(rysk, path, "req-1", quote(), api.url()));
+  ::unlink(path.c_str());
   CHECK_MSG(out.exit_code != 0, "the api answers 200, the exit code is the result");
   CHECK_MSG(out.out.find("request expired") != std::string::npos, out.out);
   CHECK_MSG(out.err.find("1 of 1 quotes rejected") != std::string::npos, out.err);
@@ -351,6 +371,188 @@ TEST(run_lines_hands_over_each_line_as_it_arrives) {
   CHECK_EQ(code, 0);
   CHECK_MSG(!lines.empty(), "no lines delivered");
   if (!lines.empty()) CHECK_MSG(!lines[0].empty(), "first line was empty");
+}
+
+// cat stands in for connect: what send writes is exactly what comes back, so
+// this pins the wire format - one json array of args per line.
+TEST(send_writes_each_command_as_one_json_line) {
+  Rysk::Options options;
+  options.cli_path = "/bin/cat";
+  options.skip_version_check = true;
+  Rysk rysk(Env::Testnet, PK, options);
+
+  std::vector<std::string> args{"quote", "--rfq_id", "a \"quoted\"\nid", "--is_put"};
+  std::optional<Json> echoed;
+  {
+    Process process = rysk.spawn({});  // no args: cat echoes stdin
+    process.send(args);
+    std::thread reader([&] {
+      process.read_lines([&](const std::string& line) {
+        echoed = Json::parse(line);
+        process.kill();
+      });
+    });
+    reader.join();
+  }  // the destructor reaps without hanging
+
+  CHECK_MSG(echoed.has_value(), "nothing came back");
+  if (echoed) CHECK_MSG(*echoed == Json(Json::Array(args.begin(), args.end())), echoed->dump());
+}
+
+static std::string env_or(const char* name, std::string fallback) {
+  const char* value = std::getenv(name);
+  return value && *value ? value : fallback;
+}
+
+static std::string lower(std::string value) {
+  for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return value;
+}
+
+// Opt in against the real testnet api (`make e2e` reads the keys from the repo's
+// .env): a taker opens an rfq only the maker may quote, the maker quotes,
+// cancels and quotes again, and the taker takes the trade on chain for 1 wei.
+TEST(testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade) {
+  std::string maker_key = env_or("RYSK_E2E_PRIVATE_KEY", "");
+  std::string maker = lower(env_or("RYSK_E2E_MAKER", ""));
+  std::string taker_key = env_or("RYSK_E2E_TAKER_PRIVATE_KEY", "");
+  std::string pool_address = lower(env_or("RYSK_E2E_POOL", ""));
+  if (maker_key.empty() || maker.empty() || taker_key.empty() || pool_address.empty()) {
+    std::cerr << "set RYSK_E2E_PRIVATE_KEY, RYSK_E2E_MAKER, RYSK_E2E_TAKER_PRIVATE_KEY and "
+                 "RYSK_E2E_POOL to run against testnet\n";
+    return;
+  }
+  if (!have_cli()) return;
+  std::string url = env_or("RYSK_E2E_PREMIUM_URL", "https://insti-testnet.rysk.finance");
+  // base sepolia's strike asset, which a request's usd has to be
+  const std::string usd = "0x98d56648c9b7f3cb49531f4135115b5000ab1733";
+
+  Rysk::Options options;
+  options.cli_path = cli_path();
+  Rysk maker_sdk(Env::Testnet, maker_key, options);
+  Rysk taker_sdk(Env::Testnet, taker_key, options);
+  auto ok = [](const Rysk& rysk, const std::vector<std::string>& args) {
+    Output out = rysk.run(args);
+    if (out.exit_code != 0) throw std::runtime_error(args[1] + ": " + out.err + "\n" + out.out);
+    std::string text = trimmed(out.out);
+    auto parsed = Json::parse(text.empty() ? "[]" : text);
+    return parsed ? *parsed : Json(text);
+  };
+  auto text = [](const Json& v) { return v.as_string().value_or(v.dump()); };
+  // unix nanoseconds: spent once per address, fresh across runs
+  std::int64_t last = 0;
+  auto nonce = [&] {
+    std::int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+    last = now > last ? now : last + 1;
+    return std::to_string(last);
+  };
+
+  // 1. the taker opens a request on the pool, only this maker may quote
+  Json pools = ok(taker_sdk, taker_sdk.premium_pools_args(url));
+  std::optional<Json> pool;
+  if (const Json::Array* listed = pools.as_array()) {
+    for (const Json& p : *listed) {
+      if (lower(text(p["address"])) == pool_address) pool = p;
+    }
+  }
+  if (!pool) throw std::runtime_error("pool " + pool_address + " is not listed");
+  std::int64_t chain_id = (*pool)["chainId"].as_int().value_or(0);
+
+  // next friday 08:00 utc at least a week out; 1970-01-01 was a thursday
+  std::int64_t day = millis() / 1000 / 86400 + 7;
+  while ((day + 4) % 7 != 5) ++day;
+  Json::Object entry{
+      {"asset", (*pool)["underlying"]},
+      {"chainId", Json(chain_id)},
+      {"expiry", Json(day * 86400 + 8 * 3600)},
+      {"isPut", Json(text((*pool)["type"]) == "Put")},
+      {"isTakerBuy", Json(false)},
+      {"quantity", Json("1000000000000000000")},
+      {"strike", Json("100000000000000")},
+      {"taker", (*pool)["address"]},
+      {"usd", Json(usd)},
+      {"collateralAsset", (*pool)["asset"]},
+      {"premiumAsset", (*pool)["asset"]},
+      {"isPremium", Json(true)},
+      {"makers", Json(Json::Array{Json(maker)})},
+      {"validUntil", Json(millis() + 5 * 60000)},
+  };
+  char dir[] = "/tmp/rysk-e2e-XXXXXX";
+  if (!::mkdtemp(dir)) throw std::runtime_error("mkdtemp failed");
+  std::string file = std::string(dir) + "/requests.json";
+  std::ofstream(file) << Json(Json::Array{Json(std::move(entry))}).dump();
+  ok(taker_sdk, taker_sdk.premium_request_args(file, chain_id, nonce(), url));
+
+  // 2. the maker polls its requests until that one shows up
+  std::optional<Request> request;
+  for (int i = 0; i < 30 && !request; i++) {
+    Json requests = ok(maker_sdk, maker_sdk.premium_requests_args(maker, url));
+    if (const Json::Array* listed = requests.as_array()) {
+      for (const Json& r : *listed) {
+        std::optional<Request> parsed = Request::from_json(r);
+        if (parsed && lower(parsed->taker) == pool_address) request = parsed;
+      }
+    }
+    if (!request) std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+  if (!request) throw std::runtime_error("no request from " + pool_address + " listed for " + maker);
+  std::string request_id = request->id.value_or("");
+
+  auto quote = [&] {
+    Quote q;
+    q.asset_address = request->asset;
+    q.chain_id = request->chain_id;
+    q.expiry = request->expiry;
+    q.is_put = request->is_put;
+    q.is_taker_buy = request->is_taker_buy.value_or(false);
+    q.quantity = request->quantity;
+    q.strike = request->strike;
+    q.usd = request->usd;
+    q.collateral_asset = request->collateral_asset;
+    q.maker = maker;
+    q.nonce = nonce();
+    q.price = "1";
+    q.valid_until = millis() / 1000 + 300;
+    q.domain = request->type_data_domain;
+    ok(maker_sdk, post_one(maker_sdk, std::string(dir) + "/quote.json", request_id, q, url));
+    return q.nonce;
+  };
+  // the id of the maker's live quote with this nonce, or "" when there is none
+  auto on_book = [&](const std::string& n) -> std::string {
+    Json book = ok(maker_sdk, maker_sdk.premium_quotes_args(maker, url));
+    if (const Json::Array* quotes = book.as_array()) {
+      for (const Json& listed : *quotes) {
+        if (text(listed["nonce"]) == n) return text(listed["id"]);
+      }
+    }
+    return "";
+  };
+
+  // 3-4. quote, then cancel it off the book
+  std::string first = quote();
+  std::string id = on_book(first);
+  CHECK_MSG(!id.empty(), "quote with nonce " + first + " is not in the maker's live quotes");
+  if (id.empty()) return;
+  ok(maker_sdk, maker_sdk.premium_cancel_args(id, request->chain_id, nonce(), url));
+  CHECK_MSG(on_book(first).empty(), "quote " + id + " is still live after cancel");
+
+  // 5-6. quote again, and the taker takes it from the request's book
+  std::string second = quote();
+  Json offered = ok(taker_sdk, taker_sdk.premium_request_quotes_args(request_id, url));
+  std::string picked;
+  if (const Json::Array* quotes = offered.as_array()) {
+    for (const Json& listed : *quotes) {
+      if (text(listed["nonce"]) == second) picked = text(listed["id"]);
+    }
+  }
+  CHECK_MSG(!picked.empty(),
+            "quote with nonce " + second + " is not on request " + request_id + "'s book");
+  if (picked.empty()) return;
+  Json tx = ok(taker_sdk, taker_sdk.premium_execute_args(picked, nonce(), url));
+  CHECK_MSG(std::regex_match(text(tx), std::regex("0x[0-9a-fA-F]{64}")), text(tx));
+  CHECK_MSG(on_book(second).empty(), "quote " + picked + " is still live after the trade");
 }
 
 HARNESS_MAIN()

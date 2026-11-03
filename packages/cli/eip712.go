@@ -88,6 +88,13 @@ var EIP712_TYPES = &apitypes.Types{
 			Type: "address",
 		},
 	},
+	"WillRedeem": {
+		{Name: "account", Type: "address"},
+		{Name: "otoken", Type: "address"},
+		{Name: "chainId", Type: "uint256"},
+		{Name: "willRedeem", Type: "bool"},
+		{Name: "nonce", Type: "string"},
+	},
 	"Transfer": {
 		{
 			Name: "user",
@@ -117,6 +124,29 @@ var EIP712_TYPES = &apitypes.Types{
 }
 
 // EncodeTypedData - Encoding the typed data
+// confirmationType is the Confirmation struct a taker signs to accept a quote,
+// in v12 and premium alike. The field order is part of the typehash, so it has
+// to match the contracts' exactly.
+var confirmationType = []apitypes.Type{
+	{Name: "maker", Type: "address"},
+	{Name: "assetAddress", Type: "address"},
+	{Name: "chainId", Type: "uint256"},
+	{Name: "expiry", Type: "uint64"},
+	{Name: "isPut", Type: "bool"},
+	{Name: "nonce", Type: "uint64"},
+	{Name: "price", Type: "uint256"},
+	{Name: "quantity", Type: "uint256"},
+	{Name: "quoteNonce", Type: "uint64"},
+	{Name: "quoteSignature", Type: "bytes"},
+	{Name: "strike", Type: "uint256"},
+	{Name: "taker", Type: "address"},
+	{Name: "isTakerBuy", Type: "bool"},
+	{Name: "usd", Type: "address"},
+	{Name: "collateralAsset", Type: "address"},
+	{Name: "collateralAmount", Type: "uint256"},
+	{Name: "gasFee", Type: "uint256"},
+}
+
 func EncodeTypedData(typedData *apitypes.TypedData) (common.Hash, error) {
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {
@@ -253,4 +283,16 @@ func CreateTransferMessage(t Transfer) (messageHash []byte, typedData *apitypes.
 	}
 	messageHash = hash.Bytes()
 	return messageHash, typedData, nil
+}
+
+func CreateWillRedeemMessage(w WillRedeem) ([]byte, error) {
+	msg, _ := json.Marshal(w)
+	var imessage map[string]interface{}
+	json.Unmarshal(msg, &imessage)
+	delete(imessage, "signature")
+	hash, err := EncodeTypedData(createEIP712TypedData(createEIP712Domain(int64(w.ChainID)), "WillRedeem", imessage))
+	if err != nil {
+		return nil, err
+	}
+	return hash.Bytes(), nil
 }

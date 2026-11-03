@@ -66,12 +66,11 @@ test("approve can be told to approve any erc20", () => {
 test("no arg builder carries the private key", () => {
   const rysk = sdk();
   const builders = [
-    rysk.connectArgs("chan", "maker"),
-    rysk.disconnectArgs("chan"),
+    rysk.connectArgs("maker"),
     rysk.approveArgs(84532, "1", "https://rpc"),
-    rysk.balancesArgs("chan", MAKER),
-    rysk.positionsArgs("chan", MAKER),
-    rysk.transferArgs("chan", {
+    rysk.balancesArgs(MAKER),
+    rysk.positionsArgs(MAKER),
+    rysk.transferArgs({
       user: MAKER,
       amount: "1",
       asset: ASSET,
@@ -79,13 +78,17 @@ test("no arg builder carries the private key", () => {
       is_deposit: true,
       nonce: "1",
     }),
-    rysk.quoteArgs("chan", "rfq", quote()),
+    rysk.quoteArgs("rfq", quote()),
     rysk.premiumRequestsArgs(MAKER),
     rysk.premiumQuotesArgs(MAKER),
     rysk.premiumQuoteStatusArgs("id"),
-    rysk.premiumQuoteArgs("rfq", quote({ domain: { verifyingContract: HANDLER } })),
     rysk.premiumQuoteBatchArgs("batch.json"),
     rysk.premiumCancelArgs("id", 84532, "43"),
+    rysk.premiumRequestArgs("requests.json", 84532, "44"),
+    rysk.premiumCancelRequestArgs("id", 84532, "45"),
+    rysk.premiumExecuteArgs("7", "46"),
+    rysk.willRedeemArgs(84532, MAKER, ASSET, true, "1"),
+    rysk.selfRedeemArgs(84532, "1"),
   ];
 
   for (const args of builders) {
@@ -94,20 +97,42 @@ test("no arg builder carries the private key", () => {
   }
 });
 
-test("connect and disconnect address the channel and env url", () => {
-  const rysk = sdk();
-  assert.deepEqual(rysk.connectArgs("chan", "maker"), [
+test("connect addresses the env url", () => {
+  assert.deepEqual(sdk().connectArgs("maker"), [
     "connect",
-    "--channel_id",
-    "chan",
     "--url",
     "wss://rip-testnet.rysk.finance/maker",
   ]);
-  assert.deepEqual(rysk.disconnectArgs("chan"), ["disconnect", "--channel_id", "chan"]);
+});
+
+test("send writes one json args line into the process's stdin", async () => {
+  const rysk = sdk();
+  rysk._cli_path = "cat"; // echoes stdin back, standing in for connect
+  const proc = rysk.execute();
+  const args = sdk().quoteArgs("rfq-1", quote());
+
+  try {
+    const line = new Promise((resolve) => proc.on("message", (data) => resolve(data.toString())));
+    proc.send(args);
+    // a message is exactly one line, newline stripped
+    assert.deepEqual(JSON.parse(await line), args);
+  } finally {
+    proc.close();
+  }
+});
+
+test("no arg builder emits an empty arg", () => {
+  const rysk = sdk();
+  for (const args of [
+    rysk.quoteArgs("rfq", quote({ isPut: false, isTakerBuy: false })),
+    rysk.transferArgs({ user: MAKER, amount: "1", asset: ASSET, chain_id: 84532, is_deposit: false, nonce: "1" }),
+  ]) {
+    assert.ok(!args.includes(""), `${args[0]} carries "", which the cli rejects`);
+  }
 });
 
 test("quote passes the terms and the booleans it was given", () => {
-  const args = sdk().quoteArgs("chan", "rfq-1", quote({ isTakerBuy: true }));
+  const args = sdk().quoteArgs("rfq-1", quote({ isTakerBuy: true }));
 
   assert.equal(flagValue(args, "--rfq_id"), "rfq-1");
   assert.equal(flagValue(args, "--asset"), ASSET);
@@ -116,27 +141,15 @@ test("quote passes the terms and the booleans it was given", () => {
   assert.ok(args.includes("--is_put"));
   assert.ok(args.includes("--is_taker_buy"));
 
-  const call = sdk().quoteArgs("chan", "rfq-1", quote({ isPut: false, isTakerBuy: false }));
+  const call = sdk().quoteArgs("rfq-1", quote({ isPut: false, isTakerBuy: false }));
   assert.ok(!call.includes("--is_put"));
   assert.ok(!call.includes("--is_taker_buy"));
 });
 
 test("quote sends the premium asset only when it is set", () => {
-  const withAsset = sdk().quoteArgs("chan", "rfq", quote({ premiumAsset: HANDLER }));
+  const withAsset = sdk().quoteArgs("rfq", quote({ premiumAsset: HANDLER }));
   assert.equal(flagValue(withAsset, "--premium_asset"), HANDLER);
-  assert.ok(!sdk().quoteArgs("chan", "rfq", quote()).includes("--premium_asset"));
-});
-
-test("premium quote carries the domain and the request id", () => {
-  const args = sdk().premiumQuoteArgs("req-1", quote({
-    domain: { name: "PremiumOptionHandler", version: "1", verifyingContract: HANDLER },
-  }));
-
-  assert.deepEqual(args.slice(0, 2), ["premium", "quote"]);
-  assert.equal(flagValue(args, "--request_id"), "req-1");
-  assert.equal(flagValue(args, "--domain_name"), "PremiumOptionHandler");
-  assert.equal(flagValue(args, "--domain_version"), "1");
-  assert.equal(flagValue(args, "--domain_verifying_contract"), HANDLER);
+  assert.ok(!sdk().quoteArgs("rfq", quote()).includes("--premium_asset"));
 });
 
 test("premium url is only passed when given", () => {
@@ -150,42 +163,26 @@ test("premium url is only passed when given", () => {
 
 test("a domain the cli cannot sign is rejected before spawning", () => {
   const rysk = sdk();
+  const batch = (domain) => rysk.premiumQuoteBatch([{ requestId: "req", quote: quote({ domain }) }]);
 
+  assert.throws(() => batch(undefined), /missing verifyingContract/);
+  assert.throws(() => batch({ verifyingContract: HANDLER, salt: "0x01" }), /salt is not supported/);
   assert.throws(
-    () => rysk.premiumQuoteArgs("req", quote()),
-    /missing verifyingContract/,
-  );
-  assert.throws(
-    () => rysk.premiumQuoteArgs("req", quote({ domain: { verifyingContract: HANDLER, salt: "0x01" } })),
-    /salt is not supported/,
-  );
-  assert.throws(
-    () =>
-      rysk.premiumQuoteArgs(
-        "req",
-        quote({ domain: { verifyingContract: HANDLER, chainId: 8453 } }),
-      ),
+    () => batch({ verifyingContract: HANDLER, chainId: 8453 }),
     /does not match the quote's chain 84532/,
   );
   // a hex chain id that does match is fine
-  assert.ok(
-    rysk.premiumQuoteArgs(
-      "req",
-      quote({ domain: { verifyingContract: HANDLER, chainId: "0x14a34" } }),
-    ),
-  );
+  assert.ok(batch({ verifyingContract: HANDLER, chainId: "0x14a34" }));
 });
 
-test("websocket quote rejects a partial domain, premium defaults its name", () => {
+test("websocket quote takes the domain all or nothing", () => {
   const rysk = sdk();
   assert.throws(
-    () => rysk.quoteArgs("chan", "rfq", quote({ domain: { name: "rysk" } })),
+    () => rysk.quoteArgs("rfq", quote({ domain: { name: "rysk" } })),
     /missing version, verifyingContract/,
   );
-
-  const premium = rysk.premiumQuoteArgs("req", quote({ domain: { verifyingContract: HANDLER } }));
-  assert.ok(!premium.includes("--domain_name"));
-  assert.equal(flagValue(premium, "--domain_verifying_contract"), HANDLER);
+  const args = rysk.quoteArgs("rfq", quote({ domain: { name: "rysk", version: "0.0.0", verifyingContract: HANDLER } }));
+  assert.equal(flagValue(args, "--domain_verifying_contract"), HANDLER);
 });
 
 test("premiumQuoteBatch serialises entries the cli can read", () => {
@@ -320,4 +317,18 @@ test("an error carries its free form data through", () => {
   const err = { code: -32000, message: "nope", data: { why: "late" } };
   assert.ok(isErrorData(err));
   assert.deepEqual(err.data, { why: "late" });
+});
+
+test("will_redeem and self-redeem spell the cli's flags", () => {
+  const rysk = sdk();
+  assert.deepEqual(rysk.willRedeemArgs(84532, MAKER, ASSET, true, "7"), [
+    "will_redeem", "--chain_id", "84532", "--account", MAKER, "--otoken", ASSET, "--nonce", "7", "--will_redeem",
+  ]);
+  assert.ok(!rysk.willRedeemArgs(84532, MAKER, ASSET, false, "7").includes("--will_redeem"));
+  assert.deepEqual(rysk.selfRedeemArgs(84532, "8"), [
+    "self-redeem", "--url", "https://rip-testnet.rysk.finance", "--chain_id", "84532", "--nonce", "8",
+  ]);
+  assert.deepEqual(rysk.selfRedeemArgs(84532, "8", 1767225600, [ASSET, MAKER], "http://x").slice(2), [
+    "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", `${ASSET},${MAKER}`,
+  ]);
 });

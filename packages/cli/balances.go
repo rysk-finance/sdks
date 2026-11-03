@@ -2,30 +2,24 @@ package main
 
 import (
 	"strings"
-
-	"github.com/urfave/cli/v2"
 )
 
-var balancesAction = &cli.Command{
-	Name: "balances",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "channel_id",
-			Required: true,
-			Usage:    "the socket id to send messages into",
-		},
-		&cli.StringFlag{
+var balancesAction = &Command{
+	Name:  "balances",
+	Usage: "request the account's balances over the connection",
+	Flags: []Flag{
+		&StringFlag{
 			Name:     "account",
 			Required: true,
 			Usage:    "address of the account to get positions for",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return balances(c)
 	},
 }
 
-func balances(c *cli.Context) error {
+func balances(c *Context) error {
 	account := strings.ToLower(c.String("account"))
 
 	payload := JsonRPCRequest{
@@ -37,5 +31,5 @@ func balances(c *cli.Context) error {
 		},
 	}
 
-	return writeToSocket(c.String("channel_id"), payload)
+	return send(payload)
 }

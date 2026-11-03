@@ -2,75 +2,137 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
-	"net"
 	"os"
 	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
-	"github.com/urfave/cli/v2"
 )
 
-var connectAction = &cli.Command{
+var connectAction = &Command{
 	Name:  "connect",
-	Usage: "instantiate a websocket connection",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "channel_id",
-			Required: true,
-			Usage:    "a unique id so you can later interact with this specific websocket",
-		},
-		&cli.StringFlag{
+	Usage: "instantiate a websocket connection, sending the commands written to stdin",
+	Flags: []Flag{
+		&StringFlag{
 			Name:     "url",
 			Required: true,
 			Usage:    "ws url to connect to",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return connect(c)
 	},
 }
 
-func connect(c *cli.Context) error {
-	channel_id := c.String("channel_id")
-	socketPath := fmt.Sprintf("/tmp/%s.sock", channel_id)
-	cmdChan := make(chan []byte)
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+// send is where the channel commands put their payload. Run on their own they
+// print it, so a signed message can be inspected or piped; inside connect it
+// goes to the websocket.
+var send = func(payload any) error {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Fatalf("listen error: %v", err)
+		return fmt.Errorf("invalid payload: %v", err)
 	}
-	defer ln.Close()
-	defer os.Remove(socketPath)
+	fmt.Println(string(data))
+	return nil
+}
 
+// channelApp runs the commands connect reads from stdin: only the ones that
+// write to the websocket.
+var channelApp = &Command{
+	Name: "ryskV12",
+	Subcommands: []*Command{
+		// maker
+		balancesAction, positionsAction, quoteAction, transferAction, willRedeemAction,
+		// taker
+		inventoryAction, requestAction, confirmAction,
+	},
+}
+
+func connect(c *Context) error {
 	ctx, cancel := context.WithCancel(c.Context)
-	// ws connection
-	conn, _, err := websocket.DefaultDialer.Dial(c.String("url"), nil)
+	connectURL = c.String("url")
+	conn, _, err := websocket.DefaultDialer.Dial(connectURL, nil)
 	if err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
 	client := NewClient(ctx, cancel, conn)
-	client.SetHandler(func(msg []byte) {
-		fmt.Println(string(msg))
-	})
+	client.SetHandler(printLine)
+	send = func(payload any) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("invalid payload: %v", err)
+		}
+		client.Send(data)
+		return nil
+	}
+	// stdin closing only stops commands; the connection stays up until it is
+	// killed or the server closes it, so a listen-only connect can run with
+	// stdin at /dev/null.
+	go runCommands(os.Stdin)
 	go listenMessages(client)
-	go pipeCommands(ctx, ln, cmdChan)
+	<-ctx.Done()
+	return nil
+}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case cmd := <-cmdChan:
-			if strings.Contains(string(cmd), "disconnect") {
-				cancel()
-				return nil
-			} else {
-				client.Send(cmd)
-			}
+// runCommands runs each line of r - a json array of args, as they would follow
+// `ryskV12` on the command line - in order, in this process.
+func runCommands(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		var args []string
+		if err := json.Unmarshal(scanner.Bytes(), &args); err != nil || len(args) == 0 {
+			log.Printf("ignoring command %q: want a json array of args", scanner.Text())
+			continue
+		}
+		if err := channelApp.Run(context.Background(), args); err != nil {
+			// reported like the server's own errors, under the id the server
+			// would have answered with, so the invoker handles both the same way
+			out, _ := json.Marshal(JsonRPCResponse{
+				JsonRPC: "2.0",
+				ID:      commandID(args),
+				Error:   &ErrorData{Code: -32602, Message: fmt.Sprintf("%s: %v", args[0], err)},
+			})
+			printLine(out)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("error reading commands: %v", err)
+	}
+}
+
+// printLine writes one message per stdout line, which is how the invoker tells
+// messages apart: json is compacted so a pretty printed message cannot span
+// lines.
+func printLine(msg []byte) {
+	var line bytes.Buffer
+	if json.Compact(&line, msg) != nil {
+		line.Reset()
+		line.Write(bytes.ReplaceAll(msg, []byte("\n"), []byte(" ")))
+	}
+	fmt.Println(line.String())
+}
+
+// commandID is the id the server answers a command under: the rfq for a quote,
+// the method otherwise.
+func commandID(args []string) string {
+	for i, arg := range args {
+		name, value, inline := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name != "rfq_id" {
+			continue
+		}
+		if inline {
+			return value
+		}
+		if i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return args[0]
 }
 
 func listenMessages(client *Client) {
@@ -87,48 +149,4 @@ func listenMessages(client *Client) {
 			client.Ingest(msg)
 		}
 	}
-}
-
-func writeToSocket(channelID string, payload any) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("invalid payload: %v", err)
-	}
-
-	socketPath := fmt.Sprintf("/tmp/%s.sock", channelID)
-	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketPath, Net: "unix"})
-	if err != nil {
-		return fmt.Errorf("failed to connect to socket: %v", err)
-	}
-	defer conn.Close()
-
-	_, err = conn.Write(append(data, '\n')) // Append newline for line-based reading.
-	if err != nil {
-		return fmt.Errorf("failed to write to socket: %v", err)
-	}
-	return nil
-}
-
-func pipeCommands(ctx context.Context, ln *net.UnixListener, ch chan<- []byte) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			unixConn, err := ln.AcceptUnix()
-			if err != nil {
-				log.Fatalf("accept error: %v", err)
-			}
-			scanner := bufio.NewScanner(unixConn)
-			for scanner.Scan() {
-				cmd := scanner.Bytes()
-				ch <- cmd
-			}
-			if err := scanner.Err(); err != nil {
-				log.Printf("Error reading from socket: %v", err)
-			}
-			unixConn.Close()
-		}
-	}
-
 }

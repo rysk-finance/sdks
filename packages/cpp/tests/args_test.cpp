@@ -62,13 +62,24 @@ static std::string flag_value(const std::vector<std::string>& args, const std::s
 
 // --------------------------------------------------------------------- basics
 
-TEST(connect_and_disconnect) {
+TEST(connect_addresses_the_env_url) {
+  CHECK_EQ(sdk().connect_args("maker"),
+           (std::vector<std::string>{"connect", "--url", "wss://rip-testnet.rysk.finance/maker"}));
+}
+
+TEST(will_redeem_and_self_redeem_spell_the_cli_flags) {
   Rysk rysk = sdk();
-  CHECK_EQ(rysk.connect_args("chan", "maker"),
-           (std::vector<std::string>{"connect", "--channel_id", "chan", "--url",
-                                     "wss://rip-testnet.rysk.finance/maker"}));
-  CHECK_EQ(rysk.disconnect_args("chan"),
-           (std::vector<std::string>{"disconnect", "--channel_id", "chan"}));
+  CHECK_EQ(rysk.will_redeem_args(84532, MAKER, ASSET, true, "7"),
+           (std::vector<std::string>{"will_redeem", "--chain_id", "84532", "--account", MAKER,
+                                     "--otoken", ASSET, "--nonce", "7", "--will_redeem"}));
+  CHECK(!has(rysk.will_redeem_args(84532, MAKER, ASSET, false, "7"), "--will_redeem"));
+  CHECK_EQ(rysk.self_redeem_args(84532, "8"),
+           (std::vector<std::string>{"self-redeem", "--url", "https://rip-testnet.rysk.finance",
+                                     "--chain_id", "84532", "--nonce", "8"}));
+  auto full = rysk.self_redeem_args(84532, "8", 1767225600, {ASSET, MAKER}, std::string("http://x"));
+  CHECK_EQ(flag_value(full, "--url"), std::string("http://x"));
+  CHECK_EQ(flag_value(full, "--expiry"), std::string("1767225600"));
+  CHECK_EQ(flag_value(full, "--exclude_assets"), std::string(ASSET) + "," + MAKER);
 }
 
 TEST(every_env_has_its_own_url) {
@@ -99,13 +110,13 @@ TEST(transfer_flags_a_deposit_but_not_a_withdrawal) {
   transfer.is_deposit = true;
   transfer.nonce = "1";
 
-  auto deposit = rysk.transfer_args("chan", transfer);
+  auto deposit = rysk.transfer_args(transfer);
   CHECK(has(deposit, "--is_deposit"));
   CHECK_EQ(flag_value(deposit, "--chain_id"), std::string("84532"));
   CHECK_EQ(flag_value(deposit, "--amount"), std::string("1"));
 
   transfer.is_deposit = false;
-  CHECK(!has(rysk.transfer_args("chan", transfer), "--is_deposit"));
+  CHECK(!has(rysk.transfer_args(transfer), "--is_deposit"));
 }
 
 // ---------------------------------------------------------------------- quote
@@ -114,7 +125,7 @@ TEST(quote_passes_terms_and_flags) {
   Rysk rysk = sdk();
   Quote q = quote();
   q.is_taker_buy = true;
-  auto args = rysk.quote_args("chan", "rfq-1", q);
+  auto args = rysk.quote_args("rfq-1", q);
 
   CHECK_EQ(flag_value(args, "--rfq_id"), std::string("rfq-1"));
   CHECK_EQ(flag_value(args, "--asset"), std::string(ASSET));
@@ -125,7 +136,7 @@ TEST(quote_passes_terms_and_flags) {
 
   q.is_put = false;
   q.is_taker_buy = false;
-  auto neither = rysk.quote_args("chan", "rfq-1", q);
+  auto neither = rysk.quote_args("rfq-1", q);
   CHECK(!has(neither, "--is_put"));
   CHECK(!has(neither, "--is_taker_buy"));
 }
@@ -134,8 +145,8 @@ TEST(quote_sends_premium_asset_only_when_set) {
   Rysk rysk = sdk();
   Quote q = quote();
   q.premium_asset = HANDLER;
-  CHECK_EQ(flag_value(rysk.quote_args("chan", "rfq", q), "--premium_asset"), std::string(HANDLER));
-  CHECK(!has(rysk.quote_args("chan", "rfq", quote()), "--premium_asset"));
+  CHECK_EQ(flag_value(rysk.quote_args("rfq", q), "--premium_asset"), std::string(HANDLER));
+  CHECK(!has(rysk.quote_args("rfq", quote()), "--premium_asset"));
 }
 
 TEST(websocket_quote_needs_a_whole_domain) {
@@ -144,43 +155,16 @@ TEST(websocket_quote_needs_a_whole_domain) {
   TypedDataDomain domain;
   domain.name = "rysk";
   q.domain = domain;
-  CHECK_THROWS(rysk.quote_args("chan", "rfq", q), "missing version, verifyingContract");
+  CHECK_THROWS(rysk.quote_args("rfq", q), "missing version, verifyingContract");
 }
 
 TEST(websocket_quote_without_a_domain_sends_no_domain_flags) {
-  auto args = sdk().quote_args("chan", "rfq", quote());
+  auto args = sdk().quote_args("rfq", quote());
   CHECK(!has(args, "--domain_name"));
   CHECK(!has(args, "--domain_verifying_contract"));
 }
 
 // -------------------------------------------------------------- premium quote
-
-TEST(premium_quote_carries_domain_and_request_id) {
-  Rysk rysk = sdk();
-  Quote q = quote();
-  TypedDataDomain domain;
-  domain.name = "PremiumOptionHandler";
-  domain.version = "1";
-  domain.verifying_contract = HANDLER;
-  q.domain = domain;
-
-  auto args = rysk.premium_quote_args("req-1", q);
-  CHECK_EQ(args[0], std::string("premium"));
-  CHECK_EQ(args[1], std::string("quote"));
-  CHECK_EQ(flag_value(args, "--request_id"), std::string("req-1"));
-  CHECK_EQ(flag_value(args, "--domain_name"), std::string("PremiumOptionHandler"));
-  CHECK_EQ(flag_value(args, "--domain_version"), std::string("1"));
-  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
-}
-
-TEST(premium_defaults_the_domain_name) {
-  Quote q = quote();
-  q.domain = premium_domain();
-  auto args = sdk().premium_quote_args("req", q);
-  CHECK(!has(args, "--domain_name"));
-  CHECK(!has(args, "--domain_version"));
-  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
-}
 
 TEST(premium_url_only_passed_when_given) {
   Rysk rysk = sdk();
@@ -194,41 +178,53 @@ TEST(premium_url_only_passed_when_given) {
   CHECK(has(rysk.premium_quote_status_args("id", url), "--url"));
   CHECK(has(rysk.premium_cancel_args("id", 1, "1", url), "--url"));
   CHECK(has(rysk.premium_quote_batch_args("f.json", url), "--url"));
+  CHECK(!has(rysk.premium_pools_args(), "--url"));
+  CHECK(has(rysk.premium_pools_args(url), "--url"));
+  CHECK(has(rysk.premium_request_args("f.json", 1, "1", url), "--url"));
+  CHECK(has(rysk.premium_taker_requests_args("0xpool", url), "--url"));
+  CHECK(has(rysk.premium_request_quotes_args("id", url), "--url"));
+  CHECK(has(rysk.premium_cancel_request_args("id", 1, "1", url), "--url"));
+  CHECK(has(rysk.premium_execute_args("7", "1", url), "--url"));
 }
 
 TEST(premium_rejects_unsignable_domains) {
   Rysk rysk = sdk();
+  auto batch = [&](std::optional<TypedDataDomain> domain) {
+    Quote q = quote();
+    q.domain = domain;
+    return rysk.premium_quote_batch({{"req", q}});
+  };
 
-  CHECK_THROWS(rysk.premium_quote_args("req", quote()), "missing verifyingContract");
+  CHECK_THROWS(batch(std::nullopt), "missing verifyingContract, pass the request's typeDataDomain");
 
-  Quote salted = quote();
   TypedDataDomain with_salt = premium_domain();
   with_salt.salt = "0x01";
-  salted.domain = with_salt;
-  CHECK_THROWS(rysk.premium_quote_args("req", salted), "salt is not supported");
+  CHECK_THROWS(batch(with_salt), "salt is not supported");
 
-  Quote wrong_chain = quote();
   TypedDataDomain other = premium_domain();
   other.chain_id = "8453";
-  wrong_chain.domain = other;
-  CHECK_THROWS(rysk.premium_quote_args("req", wrong_chain),
-               "does not match the quote's chain 84532");
+  CHECK_THROWS(batch(other), "does not match the quote's chain 84532");
 
-  Quote unparseable = quote();
   TypedDataDomain text = premium_domain();
   text.chain_id = "mainnet";
-  unparseable.domain = text;
-  CHECK_THROWS(rysk.premium_quote_args("req", unparseable), "does not match");
+  CHECK_THROWS(batch(text), "does not match");
+
+  // the server marshals chain ids as hex strings, so 0x14a34 is 84532
+  TypedDataDomain hex = premium_domain();
+  hex.chain_id = "0x14a34";
+  CHECK(!batch(hex).empty());
 }
 
-TEST(premium_accepts_a_matching_hex_chain_id) {
-  // the server marshals chain ids as hex strings, so 0x14a34 is 84532
+TEST(websocket_quote_sends_a_whole_domain) {
   Quote q = quote();
   TypedDataDomain domain = premium_domain();
-  domain.chain_id = "0x14a34";
+  domain.name = "rysk";
+  domain.version = "0.0.0";
   q.domain = domain;
-  CHECK_EQ(flag_value(sdk().premium_quote_args("req", q), "--domain_verifying_contract"),
-           std::string(HANDLER));
+  auto args = sdk().quote_args("rfq", q);
+  CHECK_EQ(flag_value(args, "--domain_name"), std::string("rysk"));
+  CHECK_EQ(flag_value(args, "--domain_version"), std::string("0.0.0"));
+  CHECK_EQ(flag_value(args, "--domain_verifying_contract"), std::string(HANDLER));
 }
 
 // ---------------------------------------------------------------------- batch
@@ -263,7 +259,10 @@ TEST(premium_quote_batch_serialises_entries) {
 
 TEST(premium_quote_batch_refuses_unsignable_entries) {
   // nothing is written when one entry could not be signed
-  CHECK_THROWS(sdk().premium_quote_batch({{"req", quote()}}), "missing verifyingContract");
+  Quote good = quote();
+  good.domain = premium_domain();
+  CHECK_THROWS(sdk().premium_quote_batch({{"req-0", good}, {"req-1", quote()}}),
+               "missing verifyingContract");
 }
 
 // ------------------------------------------------------------------- the key
@@ -286,19 +285,22 @@ TEST(no_arg_builder_carries_the_private_key) {
   transfer.nonce = "1";
 
   std::vector<std::vector<std::string>> builders{
-      rysk.connect_args("chan", "maker"),
-      rysk.disconnect_args("chan"),
+      rysk.connect_args("maker"),
       rysk.approve_args(84532, "1", "https://rpc", ASSET),
-      rysk.balances_args("chan", MAKER),
-      rysk.positions_args("chan", MAKER),
-      rysk.transfer_args("chan", transfer),
-      rysk.quote_args("chan", "rfq", signed_quote),
+      rysk.balances_args(MAKER),
+      rysk.positions_args(MAKER),
+      rysk.transfer_args(transfer),
+      rysk.quote_args("rfq", signed_quote),
       rysk.premium_requests_args(MAKER),
       rysk.premium_quotes_args(MAKER),
       rysk.premium_quote_status_args("id"),
-      rysk.premium_quote_args("rfq", signed_quote),
       rysk.premium_quote_batch_args("batch.json"),
       rysk.premium_cancel_args("id", 84532, "43"),
+      rysk.premium_request_args("requests.json", 84532, "44"),
+      rysk.premium_cancel_request_args("id", 84532, "45"),
+      rysk.premium_execute_args("7", "46"),
+      rysk.will_redeem_args(84532, MAKER, ASSET, true, "1"),
+      rysk.self_redeem_args(84532, "1"),
   };
 
   for (const auto& args : builders) {

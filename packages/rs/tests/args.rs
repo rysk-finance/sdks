@@ -59,21 +59,10 @@ fn has(args: &[String], flag: &str) -> bool {
 // --------------------------------------------------------------------- basics
 
 #[test]
-fn connect_and_disconnect() {
-    let sdk = sdk();
+fn connect_addresses_the_env_url() {
     assert_eq!(
-        sdk.connect_args("chan", "maker"),
-        vec![
-            "connect",
-            "--channel_id",
-            "chan",
-            "--url",
-            "wss://rip-testnet.rysk.finance/maker"
-        ]
-    );
-    assert_eq!(
-        sdk.disconnect_args("chan"),
-        vec!["disconnect", "--channel_id", "chan"]
+        sdk().connect_args("maker"),
+        vec!["connect", "--url", "wss://rip-testnet.rysk.finance/maker"]
     );
 }
 
@@ -121,7 +110,7 @@ fn transfer_flags_a_deposit_but_not_a_withdrawal() {
         nonce: "1".into(),
     };
 
-    let deposit = sdk.transfer_args("chan", &base);
+    let deposit = sdk.transfer_args(&base);
     assert!(has(&deposit, "--is_deposit"));
     assert_eq!(flag_value(&deposit, "--chain_id"), "84532");
     assert_eq!(flag_value(&deposit, "--amount"), "1");
@@ -130,10 +119,7 @@ fn transfer_flags_a_deposit_but_not_a_withdrawal() {
         is_deposit: false,
         ..base
     };
-    assert!(!has(
-        &sdk.transfer_args("chan", &withdrawal),
-        "--is_deposit"
-    ));
+    assert!(!has(&sdk.transfer_args(&withdrawal), "--is_deposit"));
 }
 
 // ---------------------------------------------------------------------- quote
@@ -143,7 +129,6 @@ fn quote_passes_terms_and_flags() {
     let sdk = sdk();
     let args = sdk
         .quote_args(
-            "chan",
             "rfq-1",
             &Quote {
                 is_taker_buy: true,
@@ -161,7 +146,6 @@ fn quote_passes_terms_and_flags() {
 
     let neither = sdk
         .quote_args(
-            "chan",
             "rfq-1",
             &Quote {
                 is_put: false,
@@ -179,7 +163,6 @@ fn quote_sends_premium_asset_only_when_set() {
     let sdk = sdk();
     let with_asset = sdk
         .quote_args(
-            "chan",
             "rfq",
             &Quote {
                 premium_asset: Some(HANDLER.into()),
@@ -189,7 +172,7 @@ fn quote_sends_premium_asset_only_when_set() {
         .unwrap();
     assert_eq!(flag_value(&with_asset, "--premium_asset"), HANDLER);
 
-    let without = sdk.quote_args("chan", "rfq", &quote()).unwrap();
+    let without = sdk.quote_args("rfq", &quote()).unwrap();
     assert!(!has(&without, "--premium_asset"));
 }
 
@@ -197,7 +180,6 @@ fn quote_sends_premium_asset_only_when_set() {
 fn websocket_quote_needs_a_whole_domain() {
     let err = sdk()
         .quote_args(
-            "chan",
             "rfq",
             &Quote {
                 domain: Some(TypedDataDomain {
@@ -217,54 +199,12 @@ fn websocket_quote_needs_a_whole_domain() {
 
 #[test]
 fn websocket_quote_without_a_domain_sends_no_domain_flags() {
-    let args = sdk().quote_args("chan", "rfq", &quote()).unwrap();
+    let args = sdk().quote_args("rfq", &quote()).unwrap();
     assert!(!has(&args, "--domain_name"));
     assert!(!has(&args, "--domain_verifying_contract"));
 }
 
 // -------------------------------------------------------------- premium quote
-
-#[test]
-fn premium_quote_carries_domain_and_request_id() {
-    let args = sdk()
-        .premium_quote_args(
-            "req-1",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    name: Some("PremiumOptionHandler".into()),
-                    version: Some("1".into()),
-                    verifying_contract: Some(HANDLER.into()),
-                    ..Default::default()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-
-    assert_eq!(&args[..2], ["premium", "quote"]);
-    assert_eq!(flag_value(&args, "--request_id"), "req-1");
-    assert_eq!(flag_value(&args, "--domain_name"), "PremiumOptionHandler");
-    assert_eq!(flag_value(&args, "--domain_version"), "1");
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
-
-#[test]
-fn premium_defaults_the_domain_name() {
-    let args = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(premium_domain()),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-    assert!(!has(&args, "--domain_name"));
-    assert!(!has(&args, "--domain_version"));
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
 
 #[test]
 fn premium_url_only_passed_when_given() {
@@ -291,95 +231,108 @@ fn premium_url_only_passed_when_given() {
         &sdk.premium_quote_batch_args("f.json", Some("http://x")),
         "--url"
     ));
+    for args in [
+        sdk.premium_pools_args(Some("http://x")),
+        sdk.premium_request_args("r.json", 1, "1", Some("http://x")),
+        sdk.premium_taker_requests_args(MAKER, Some("http://x")),
+        sdk.premium_request_quotes_args("id", Some("http://x")),
+        sdk.premium_cancel_request_args("id", 1, "1", Some("http://x")),
+        sdk.premium_execute_args("id", "1", Some("http://x")),
+    ] {
+        assert_eq!(flag_value(&args, "--url"), "http://x", "{args:?}");
+    }
 }
 
 #[test]
-fn premium_rejects_a_domain_with_no_verifying_contract() {
-    let err = sdk().premium_quote_args("req", &quote(), None).unwrap_err();
-    assert!(
-        err.to_string().contains("missing verifyingContract"),
-        "got {err}"
+fn premium_taker_builders_spell_the_cli_flags() {
+    let sdk = sdk();
+    assert_eq!(sdk.premium_pools_args(None), ["premium", "pools"]);
+    assert_eq!(
+        sdk.premium_request_args("r.json", 84532, "7", None),
+        [
+            "premium",
+            "request",
+            "--batch",
+            "r.json",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "7"
+        ]
+    );
+    assert_eq!(
+        sdk.premium_taker_requests_args(MAKER, None),
+        ["premium", "taker-requests", "--taker", MAKER]
+    );
+    assert_eq!(
+        sdk.premium_request_quotes_args("req", None),
+        ["premium", "request-quotes", "--id", "req"]
+    );
+    assert_eq!(
+        sdk.premium_cancel_request_args("req", 84532, "8", None),
+        [
+            "premium",
+            "cancel-request",
+            "--id",
+            "req",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8"
+        ]
+    );
+    assert_eq!(
+        sdk.premium_execute_args("q", "9", None),
+        ["premium", "execute", "--quote_id", "q", "--nonce", "9"]
     );
 }
 
-#[test]
-fn premium_rejects_a_salted_domain() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    salt: Some("0x01".into()),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("salt is not supported"),
-        "got {err}"
-    );
+/// Serialises one quote with this domain as a batch, the only way a premium
+/// quote's domain is checked.
+fn batch(domain: Option<TypedDataDomain>) -> Result<String, ryskv12::Error> {
+    sdk().premium_quote_batch(&[("req".to_string(), Quote { domain, ..quote() })])
 }
 
 #[test]
-fn premium_rejects_a_domain_for_another_chain() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Number(8453)),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
+fn premium_rejects_a_domain_the_cli_cannot_sign() {
+    let err = |domain| batch(domain).unwrap_err().to_string();
+
+    let missing = err(None);
     assert!(
-        err.to_string()
-            .contains("does not match the quote's chain 84532"),
-        "got {err}"
+        missing.contains("missing verifyingContract, pass the request's typeDataDomain"),
+        "got {missing}"
+    );
+    let salted = err(Some(TypedDataDomain {
+        salt: Some("0x01".into()),
+        ..premium_domain()
+    }));
+    assert!(salted.contains("salt is not supported"), "got {salted}");
+    let other_chain = err(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Number(8453)),
+        ..premium_domain()
+    }));
+    assert!(
+        other_chain.contains("does not match the quote's chain 84532"),
+        "got {other_chain}"
+    );
+    let not_a_number = err(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Text("mainnet".into())),
+        ..premium_domain()
+    }));
+    assert!(
+        not_a_number.contains("does not match"),
+        "got {not_a_number}"
     );
 }
 
 #[test]
 fn premium_accepts_a_matching_hex_chain_id() {
     // the server marshals chain ids as hex strings, so 0x14a34 is 84532
-    let args = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Text("0x14a34".into())),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap();
-    assert_eq!(flag_value(&args, "--domain_verifying_contract"), HANDLER);
-}
-
-#[test]
-fn premium_rejects_a_chain_id_that_is_not_a_number() {
-    let err = sdk()
-        .premium_quote_args(
-            "req",
-            &Quote {
-                domain: Some(TypedDataDomain {
-                    chain_id: Some(ryskv12::ChainId::Text("mainnet".into())),
-                    ..premium_domain()
-                }),
-                ..quote()
-            },
-            None,
-        )
-        .unwrap_err();
-    assert!(err.to_string().contains("does not match"), "got {err}");
+    batch(Some(TypedDataDomain {
+        chain_id: Some(ryskv12::ChainId::Text("0x14a34".into())),
+        ..premium_domain()
+    }))
+    .unwrap();
 }
 
 // --------------------------------------------------------------------- batch
@@ -447,29 +400,29 @@ fn no_arg_builder_carries_the_private_key() {
     };
 
     let builders: Vec<Vec<String>> = vec![
-        sdk.connect_args("chan", "maker"),
-        sdk.disconnect_args("chan"),
+        sdk.connect_args("maker"),
         sdk.approve_args(84532, "1", "https://rpc", Some(ASSET)),
-        sdk.balances_args("chan", MAKER),
-        sdk.positions_args("chan", MAKER),
-        sdk.transfer_args(
-            "chan",
-            &Transfer {
-                user: MAKER.into(),
-                amount: "1".into(),
-                asset: ASSET.into(),
-                chain_id: 84532,
-                is_deposit: true,
-                nonce: "1".into(),
-            },
-        ),
-        sdk.quote_args("chan", "rfq", &with_domain).unwrap(),
+        sdk.balances_args(MAKER),
+        sdk.positions_args(MAKER),
+        sdk.transfer_args(&Transfer {
+            user: MAKER.into(),
+            amount: "1".into(),
+            asset: ASSET.into(),
+            chain_id: 84532,
+            is_deposit: true,
+            nonce: "1".into(),
+        }),
+        sdk.quote_args("rfq", &with_domain).unwrap(),
         sdk.premium_requests_args(MAKER, None),
         sdk.premium_quotes_args(MAKER, None),
         sdk.premium_quote_status_args("id", None),
-        sdk.premium_quote_args("rfq", &with_domain, None).unwrap(),
         sdk.premium_quote_batch_args("batch.json", None),
         sdk.premium_cancel_args("id", 84532, "43", None),
+        sdk.premium_request_args("r.json", 84532, "1", None),
+        sdk.premium_cancel_request_args("id", 84532, "1", None),
+        sdk.premium_execute_args("id", "1", None),
+        sdk.will_redeem_args(84532, MAKER, ASSET, true, "1"),
+        sdk.self_redeem_args(84532, "1", None, &[], None),
     ];
 
     for args in builders {
@@ -515,4 +468,60 @@ fn nonce_counter_never_repeats_or_rewinds() {
     assert_eq!(fresh.last(), 0);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn will_redeem_and_self_redeem_spell_the_cli_flags() {
+    let sdk = sdk();
+    assert_eq!(
+        sdk.will_redeem_args(84532, MAKER, ASSET, true, "7"),
+        [
+            "will_redeem",
+            "--chain_id",
+            "84532",
+            "--account",
+            MAKER,
+            "--otoken",
+            ASSET,
+            "--nonce",
+            "7",
+            "--will_redeem"
+        ]
+    );
+    assert!(!sdk
+        .will_redeem_args(84532, MAKER, ASSET, false, "7")
+        .contains(&"--will_redeem".to_string()));
+    assert_eq!(
+        sdk.self_redeem_args(84532, "8", None, &[], None),
+        [
+            "self-redeem",
+            "--url",
+            "https://rip-testnet.rysk.finance",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8"
+        ]
+    );
+    let exclude = format!("{ASSET},{MAKER}");
+    assert_eq!(
+        sdk.self_redeem_args(
+            84532,
+            "8",
+            Some(1767225600),
+            &[ASSET, MAKER],
+            Some("http://x")
+        )[2..],
+        [
+            "http://x",
+            "--chain_id",
+            "84532",
+            "--nonce",
+            "8",
+            "--expiry",
+            "1767225600",
+            "--exclude_assets",
+            exclude.as_str()
+        ]
+    );
 }

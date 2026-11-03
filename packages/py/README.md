@@ -42,16 +42,38 @@ built CLI reports no version number and is left alone.
 
 ### Create a Connection
 
+`execute_async` spawns `connect` and returns the process straight away, handing each line the server
+sends to your callback in the background. `await proc.wait()` for the exit code.
+
 ```python
 
 def response_handler(response: bytes):
     print(f"Received response: {response.strip()}")
 
 
-channel_id = "rfqs_listener"
-uri = "/rfqs/0x..."  # Example websocket endpoint (replace with actual asset address)
+uri = "rfqs/0x..."  # Example websocket endpoint (replace with actual asset address)
 
-proc = rysk_sdk.execute_async(rysk_sdk.connect_args(channel_id, uri), response_handler)
+proc = await rysk_sdk.execute_async(rysk_sdk.connect_args(uri), response_handler)
+```
+
+### Send Commands Into a Connection
+
+Balances, positions, transfers and quotes are written into a running `connect` with `send`, which
+signs and sends them over its websocket - no process per command. The server's answers arrive on that
+connection's callback, and so does a command the CLI rejects: a json-rpc error under the id the server
+would have used, which `is_error_data` catches with the server's own.
+
+```python
+maker = await rysk_sdk.execute_async(rysk_sdk.connect_args("maker"), response_handler)
+rysk_sdk.send(maker, rysk_sdk.balances_args("0xabc"))
+```
+
+`send` also takes a process from `execute`.
+
+### Disconnect
+
+```python
+maker.terminate()
 ```
 
 ### Approve Spending
@@ -77,10 +99,9 @@ proc = rysk_sdk.execute(
 ### List USDC Balances
 
 ```python
-maker_channel = "maker-channel"
 account = "0xabc"
 
-proc = rysk_sdk.execute(rysk_sdk.balances_args(maker_channel, account))
+rysk_sdk.send(maker, rysk_sdk.balances_args(account))
 ```
 
 ### Deposit / Withdraw
@@ -88,7 +109,6 @@ proc = rysk_sdk.execute(rysk_sdk.balances_args(maker_channel, account))
 ```python
 from ryskV12.models import Transfer
 
-maker_channel = "maker-channel"
 transfer_details = Transfer(
     amount="500000",
     asset="0x...",  # The asset address
@@ -96,16 +116,27 @@ transfer_details = Transfer(
     is_deposit=True,
     nonce="some-unique-nonce",
 )
-proc = rysk_sdk.execute(rysk_sdk.transfer_args(maker_channel, transfer_details))
+rysk_sdk.send(maker, rysk_sdk.transfer_args(transfer_details))
 ```
 
 ### List Positions
 
 ```python
-maker_channel = "maker-channel"
 account = "0xabc"
 
-proc = rysk_sdk.execute(rysk_sdk.positions_args(maker_channel, account))
+rysk_sdk.send(maker, rysk_sdk.positions_args(account))
+```
+
+### Redemption
+
+```python
+# opt an otoken in (True) or out (False) of redemption at expiry, over the maker connection
+rysk_sdk.send(maker, rysk_sdk.will_redeem_args(84532, account, "0xotoken", True, "44"))
+
+# redeem your own expired otokens now - a plain http call to this env's api
+rysk_sdk.execute(rysk_sdk.self_redeem_args(84532, "45"))
+# or up to an expiry, skipping some assets
+rysk_sdk.execute(rysk_sdk.self_redeem_args(84532, "46", expiry=1767225600, exclude_assets=["0xasset"]))
 ```
 
 ### Send a Quote
@@ -113,7 +144,6 @@ proc = rysk_sdk.execute(rysk_sdk.positions_args(maker_channel, account))
 ```python
 from ryskV12.models import Quote
 
-maker_channel = "maker-channel"
 request_id = "some-uuid-from-server"
 quote_details = Quote(
     assetAddress="0x...",
@@ -136,7 +166,7 @@ quote_details = Quote(
     domain=request.typeDataDomain,
 )
 
-proc = rysk_sdk.execute(rysk_sdk.quote_args(maker_channel, request_id, quote_details))
+rysk_sdk.send(maker, rysk_sdk.quote_args(request_id, quote_details))
 ```
 
 `domain` needs `name`, `version` and `verifyingContract` together; its `chainId`
@@ -145,7 +175,7 @@ always comes from the quote, so a domain for another chain - or one carrying a
 
 ### Premium RFQ (maker)
 
-The premium RFQ api is plain HTTP, so these need no connection and no channel: each one runs the CLI
+The premium RFQ api is plain HTTP, so these need no connection: each one runs the CLI
 once and prints the api's response on stdout. `url` is optional — leave it out for production, pass
 it for a local or staging api.
 
@@ -155,7 +185,7 @@ from dataclasses import replace
 # requests this maker may quote, each with the domain to sign against
 proc = rysk_sdk.execute(rysk_sdk.premium_requests_args(maker))
 
-# sign and post one quote for a request
+# sign and post quotes: one or a whole strip, in one api call
 quote = replace(
     quote_details,
     maker=maker,
@@ -164,12 +194,9 @@ quote = replace(
     validUntil=int(time.time()) + 300,   # SECONDS, now+2min .. now+10min
     domain=request.typeDataDomain,       # the pool's option handler
 )
-proc = rysk_sdk.execute(rysk_sdk.premium_quote_args(request.id, quote))
-
-# a whole strip in one api call
 with open("batch.json", "w") as f:
-    f.write(rysk_sdk.premium_quote_batch([(request.id, quote_a), (request.id, quote_b)]))
-rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
+    f.write(rysk_sdk.premium_quote_batch([(request.id, quote)]))
+proc = rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
 
 # your live quotes (the only source of quote ids), one quote, and a cancel
 rysk_sdk.execute(rysk_sdk.premium_quotes_args(maker))
@@ -188,33 +215,27 @@ response and exits non zero when that array is not empty, so check the return co
 Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
 single persisted counter.
 
-## Examples
+### Premium RFQ (taker)
 
-Two runnable maker loops live in `examples/`, one per transport:
-
-| File | What it does |
-| --- | --- |
-| `examples/run_example.py` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker channel. Also reads balances and positions, and disconnects both channels on `SIGINT`. |
-| `examples/run_premium_example.py` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
-
-```sh
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> python examples/run_example.py
-
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
-  PREMIUM_URL=https://insti-testnet.rysk.finance python examples/run_premium_example.py
-```
-
-Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
-once per address and a counter that rewinds after a restart starts failing every write.
-`price_request` is the only part meant to be replaced — everything else is the plumbing the api
-expects.
+A request's taker is a pool; the SDK's key has to be one of the pool's on chain RFQ signers.
 
 ```python
-from ryskV12.nonce import NonceCounter
+rysk_sdk.execute(rysk_sdk.premium_pools_args())
 
-nonces = NonceCounter(".rysk-nonce")  # one counter per signing key
-quote_nonce = nonces.next()           # decimal string, never reused, never rewound
+# a json array of requests as the api takes them; answers with no body
+with open("requests.json", "w") as f:
+    json.dump([request], f)
+rysk_sdk.execute(rysk_sdk.premium_request_args("requests.json", chain_id, "44"))
+
+rysk_sdk.execute(rysk_sdk.premium_taker_requests_args(pool))         # the pool's live requests
+rysk_sdk.execute(rysk_sdk.premium_request_quotes_args(request_id))   # the quotes on one
+rysk_sdk.execute(rysk_sdk.premium_cancel_request_args(request_id, chain_id, "45"))
+
+# take a quote: prints the settling transaction's hash
+rysk_sdk.execute(rysk_sdk.premium_execute_args(quote_id, "46"))
 ```
+
+See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
 ## Tests
 
@@ -226,3 +247,8 @@ make dev-bin && poetry run pytest # + the integration tests, which need a cli
 
 `tests/integration` runs the real CLI against a fake api, so the arg builders and the binary cannot
 drift apart. Those tests skip themselves when no CLI is present.
+
+The `testnet` test at the bottom of `tests/integration/test_premium_cli.py` is the full premium flow end to end
+against the real testnet api — a taker opens an rfq, the maker quotes, cancels and requotes, and
+the taker takes the trade on chain. Read it as the worked example. It skips unless the e2e keys are
+set; `make e2e` from the repo root loads them from `.env`.

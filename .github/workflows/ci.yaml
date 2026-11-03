@@ -18,6 +18,9 @@ jobs:
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test ./...
+      - name: Every package carries the same cli download script
+        working-directory: ${{ github.workspace }}
+        run: make sync-scripts && git diff --exit-code -- packages
 
       # The integration job runs the sdks against this same binary. Building it
       # here and passing it along keeps go-ethereum from being compiled a second
