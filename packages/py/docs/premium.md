@@ -74,7 +74,7 @@ Poll; the api pushes nothing, and allows 30 requests a second per ip.
 
 ```python
 requests = [
-    Request.from_json(json.dumps(r))
+    Request.from_json(r)
     for r in as_json(maker, maker.premium_requests_args(MAKER, URL))
     if is_request(r)
 ]

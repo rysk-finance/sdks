@@ -2,7 +2,6 @@
 
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/stat.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -17,6 +16,7 @@
 #include <sstream>
 
 #include "ryskv12/fetch_script.hpp"
+#include "trim.hpp"
 
 namespace ryskv12 {
 
@@ -34,11 +34,12 @@ void pair(std::vector<std::string>& args, const char* flag, std::string value) {
 
 bool set(const std::optional<std::string>& value) { return value && !value->empty(); }
 
-std::string trim(const std::string& raw) {
-  std::size_t begin = raw.find_first_not_of(" \t\n\r");
-  if (begin == std::string::npos) return "";
-  std::size_t end = raw.find_last_not_of(" \t\n\r");
-  return raw.substr(begin, end - begin + 1);
+/// `ryskV12 premium <sub> <flags...> [--url <url>]`
+std::vector<std::string> premium(const char* sub, std::vector<std::string> flags,
+                                 const std::optional<std::string>& url) {
+  flags.insert(flags.begin(), {"premium", sub});
+  if (set(url)) pair(flags, "--url", *url);
+  return flags;
 }
 
 void close_fd(int& fd) {
@@ -91,7 +92,7 @@ Rysk::Rysk(Env env, std::string private_key, Options options)
       cli_path_(std::move(options.cli_path)),
       private_key_(std::move(private_key)),
       strict_version_(options.strict_version) {
-  if (!options.skip_version_check) version_check();
+  version_check();
 }
 
 std::string Rysk::url(const std::string& uri) const { return std::string(base_url(env_)) + uri; }
@@ -266,41 +267,24 @@ std::vector<std::string> Rysk::self_redeem_args(std::int64_t chain_id, const std
 
 // ----------------------------------------------------------------- premium rfq
 
-std::vector<std::string> Rysk::premium_url_args(const std::optional<std::string>& url) const {
-  if (!set(url)) return {};
-  return {"--url", *url};
-}
-
 std::vector<std::string> Rysk::premium_requests_args(const std::string& maker,
                                                      std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "requests"};
-  pair(args, "--maker", maker);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("requests", {"--maker", maker}, url);
 }
 
 std::vector<std::string> Rysk::premium_quotes_args(const std::string& maker,
                                                    std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "quotes"};
-  pair(args, "--maker", maker);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("quotes", {"--maker", maker}, url);
 }
 
 std::vector<std::string> Rysk::premium_quote_status_args(const std::string& id,
                                                          std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "quote-status"};
-  pair(args, "--id", id);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("quote-status", {"--id", id}, url);
 }
 
 std::vector<std::string> Rysk::premium_quote_batch_args(const std::string& source,
                                                         std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "quote"};
-  pair(args, "--batch", source);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("quote", {"--batch", source}, url);
 }
 
 std::string Rysk::premium_quote_batch(
@@ -320,68 +304,44 @@ std::string Rysk::premium_quote_batch(
 std::vector<std::string> Rysk::premium_cancel_args(const std::string& id, std::int64_t chain_id,
                                                    const std::string& nonce,
                                                    std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "cancel"};
-  pair(args, "--id", id);
-  pair(args, "--chain_id", std::to_string(chain_id));
-  pair(args, "--nonce", nonce);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("cancel", {"--id", id, "--chain_id", std::to_string(chain_id), "--nonce", nonce},
+                 url);
 }
 
 std::vector<std::string> Rysk::premium_pools_args(std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "pools"};
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("pools", {}, url);
 }
 
 std::vector<std::string> Rysk::premium_request_args(const std::string& source,
                                                     std::int64_t chain_id,
                                                     const std::string& nonce,
                                                     std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "request"};
-  pair(args, "--batch", source);
-  pair(args, "--chain_id", std::to_string(chain_id));
-  pair(args, "--nonce", nonce);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("request",
+                 {"--batch", source, "--chain_id", std::to_string(chain_id), "--nonce", nonce}, url);
 }
 
 std::vector<std::string> Rysk::premium_taker_requests_args(const std::string& taker,
                                                            std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "taker-requests"};
-  pair(args, "--taker", taker);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("taker-requests", {"--taker", taker}, url);
 }
 
 std::vector<std::string> Rysk::premium_request_quotes_args(const std::string& id,
                                                            std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "request-quotes"};
-  pair(args, "--id", id);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("request-quotes", {"--id", id}, url);
 }
 
 std::vector<std::string> Rysk::premium_cancel_request_args(const std::string& id,
                                                            std::int64_t chain_id,
                                                            const std::string& nonce,
                                                            std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "cancel-request"};
-  pair(args, "--id", id);
-  pair(args, "--chain_id", std::to_string(chain_id));
-  pair(args, "--nonce", nonce);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("cancel-request",
+                 {"--id", id, "--chain_id", std::to_string(chain_id), "--nonce", nonce}, url);
 }
 
 std::vector<std::string> Rysk::premium_execute_args(const std::string& quote_id,
                                                     const std::string& nonce,
                                                     std::optional<std::string> url) const {
-  std::vector<std::string> args{"premium", "execute"};
-  pair(args, "--quote_id", quote_id);
-  pair(args, "--nonce", nonce);
-  for (std::string& flag : premium_url_args(url)) args.push_back(std::move(flag));
-  return args;
+  return premium("execute", {"--quote_id", quote_id, "--nonce", nonce}, url);
 }
 
 // ---------------------------------------------------------------------- process
@@ -569,10 +529,9 @@ int Rysk::run_lines(const std::vector<std::string>& args,
 }
 
 std::string Rysk::setup() const {
-  // the script ships with the library, written out through sh's stdin so there
+  // the script ships with the library, written out through bash's stdin so there
   // is no temp file to clean up or race on
-  std::string command = "sh -s";
-  FILE* pipe = ::popen(command.c_str(), "w");
+  FILE* pipe = ::popen("bash -s", "w");  // the script is bash: [[ ]] fails under dash
   if (!pipe) throw Error("could not start the download script");
   std::fputs(kFetchScript, pipe);
   int status = ::pclose(pipe);
@@ -583,7 +542,6 @@ std::string Rysk::setup() const {
     // the script reports missing dependencies and still exits 0
     throw Error(std::string("the download script left no ") + downloaded);
   }
-  ::chmod(downloaded, 0755);
   return downloaded;
 }
 

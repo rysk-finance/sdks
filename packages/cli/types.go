@@ -30,14 +30,6 @@ type Quote struct {
 	PremiumAsset string `json:"premiumAsset,omitempty"`
 }
 
-type QuoteNotification struct {
-	RequestID string `json:"rfqId"`
-	Asset     string `json:"assetAddress"`
-	ChainID   int    `json:"chainId"`
-	NewBest   string `json:"newBest"`
-	Yours     string `json:"yours"`
-}
-
 type WillRedeem struct {
 	Account    string `json:"account"`
 	Otoken     string `json:"otoken"`

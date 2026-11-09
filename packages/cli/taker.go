@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +14,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 // Taker commands for the v12 websocket flow. They run inside a `connect` to the
@@ -101,9 +100,7 @@ var confirmAction = &Command{
 		},
 		&StringFlag{Name: "api_url", Usage: "http base of the api, for the gas fee; defaults to the connect's host"},
 	},
-	Action: func(c *Context) error {
-		return confirm(c)
-	},
+	Action: confirm,
 }
 
 // v12Confirmation is the confirmation the taker endpoint takes: the signed
@@ -198,19 +195,11 @@ func confirm(c *Context) error {
 		"collateralAmount": conf.CollateralAmount,
 		"gasFee":           conf.GasFee,
 	}
-	hash, err := EncodeTypedData(&apitypes.TypedData{
-		Types: apitypes.Types{
-			"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"],
-			"Confirmation": confirmationType,
-		},
-		PrimaryType: "Confirmation",
-		Domain:      *createEIP712Domain(int64(conf.ChainID)),
-		Message:     message,
-	})
+	hash, err := confirmationHash(createEIP712Domain(int64(conf.ChainID)), message)
 	if err != nil {
 		return err
 	}
-	if conf.Signature, err = Sign(hash.Bytes(), privateKey); err != nil {
+	if conf.Signature, err = Sign(hash, privateKey); err != nil {
 		return err
 	}
 	return send(JsonRPCRequest{JsonRPC: "2.0", ID: "confirm", Method: "confirm", Params: conf})

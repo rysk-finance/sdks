@@ -34,14 +34,11 @@ help:
 build: build-cli build-ts build-py build-rs build-cpp
 
 # Each package publishes on its own, so each carries a copy of the cli download
-# script; scripts/ holds the one that is edited. The c++ sdk embeds it as a
-# string. CI fails when a copy differs from what this writes.
+# script; scripts/ holds the one that is edited. CI fails when a copy differs
+# from what this writes.
 FETCH := scripts/fetch_latest_release.sh
 sync-scripts:
 	for d in $(TS_DIR)/scripts $(PY_DIR)/ryskV12/scripts $(RS_DIR)/scripts $(CPP_DIR)/scripts; do cp $(FETCH) $$d/; done
-	{ printf '#include "ryskv12/fetch_script.hpp"\n\nnamespace ryskv12 {\n\nconst char* const kFetchScript = R"SCRIPT('; \
-	  cat $(FETCH); \
-	  printf ')SCRIPT";\n\n}  // namespace ryskv12\n'; } > $(CPP_DIR)/src/fetch_script.cpp
 
 build-cli:
 	cd $(CLI_DIR) && VERSION=$(VERSION) ./build.sh

@@ -17,12 +17,10 @@ static const char* const HANDLER = "0x2000000000000000000000000000000000000002";
 static const char* const ASSET = "0x98d56648c9b7f3cb49531f4135115b5000ab1733";
 static const char* const KEY = "test-key";
 
-/// No binary is spawned: these builders are pure, so the version check has
-/// nothing to say and is skipped.
+/// These builders are pure; the missing binary only makes the version check warn.
 static Rysk sdk() {
   Rysk::Options options;
   options.cli_path = "./does-not-exist";
-  options.skip_version_check = true;
   return Rysk(Env::Testnet, KEY, options);
 }
 

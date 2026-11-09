@@ -1,11 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
-
-	"github.com/goccy/go-json"
 )
 
 func testQuote() Quote {

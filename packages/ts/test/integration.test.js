@@ -53,6 +53,8 @@ const run = (sdk, args) =>
 
 const sdk = () => new Rysk(Env.TESTNET, PK, CLI);
 
+const jsonOk = (body) => (_req, res) => res.writeHead(200, { "Content-Type": "application/json" }).end(body);
+
 const quote = (extra = {}) => ({
   assetAddress: ASSET,
   chainId: 84532,
@@ -88,10 +90,7 @@ const quoteBatchArgs = (rysk, url, ...entries) => {
 };
 
 test("the cli signs and posts what the sdk built", { skip: !available }, async () => {
-  const api = await fakeApi((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end('{"failures":[]}');
-  });
+  const api = await fakeApi(jsonOk('{"failures":[]}'));
 
   try {
     const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
@@ -119,20 +118,14 @@ test("the cli signs and posts what the sdk built", { skip: !available }, async (
 });
 
 test("a batch is one call", { skip: !available }, async () => {
-  const api = await fakeApi((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end('{"failures":[]}');
-  });
+  const api = await fakeApi(jsonOk('{"failures":[]}'));
 
   try {
     const entries = Array.from({ length: 5 }, (_, i) => ({
       requestId: `req-${i}`,
       quote: quote({ nonce: String(Date.now() + i) }),
     }));
-    const file = join(mkdtempSync(join(tmpdir(), "rysk-batch-")), "batch.json");
-    writeFileSync(file, sdk().premiumQuoteBatch(entries));
-
-    const result = await run(sdk(), sdk().premiumQuoteBatchArgs(file, api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, ...entries));
     assert.equal(result.code, 0, result.stderr);
     assert.equal(api.seen.length, 1, "a batch has to be one request");
     assert.equal(JSON.parse(api.seen[0].body).length, 5);
@@ -142,10 +135,7 @@ test("a batch is one call", { skip: !available }, async () => {
 });
 
 test("a rejected quote fails the command", { skip: !available }, async () => {
-  const api = await fakeApi((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end('{"failures":[{"error":"request expired","quote":{}}]}');
-  });
+  const api = await fakeApi(jsonOk('{"failures":[{"error":"request expired","quote":{}}]}'));
 
   try {
     const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
@@ -233,10 +223,7 @@ test("taker writes reach the api: request, cancel-request, execute", { skip: !av
 });
 
 test("reads proxy the api verbatim", { skip: !available }, async () => {
-  const api = await fakeApi((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end('[{"id":"b7c2"}]');
-  });
+  const api = await fakeApi(jsonOk('[{"id":"b7c2"}]'));
 
   try {
     const rysk = sdk();
@@ -259,10 +246,7 @@ test("reads proxy the api verbatim", { skip: !available }, async () => {
 });
 
 test("the cli refuses a quote it cannot get accepted", { skip: !available }, async () => {
-  const api = await fakeApi((_req, res) => {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end('{"failures":[]}');
-  });
+  const api = await fakeApi(jsonOk('{"failures":[]}'));
 
   try {
     // the window is checked before signing, so nothing reaches the api

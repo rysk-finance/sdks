@@ -36,9 +36,4 @@ export class NonceCounter {
     writeFileSync(this._path, String(next));
     return String(next);
   }
-
-  /** The last nonce handed out, or 0 when none has been. */
-  public get last(): number {
-    return this._last;
-  }
 }

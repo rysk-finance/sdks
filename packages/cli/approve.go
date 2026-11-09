@@ -43,9 +43,7 @@ var approveAction = &Command{
 			Usage: "address allowed to spend it (defaults to the chain's mmarket, which maker deposits pull through; a taker's collateral goes to the margin pool)",
 		},
 	},
-	Action: func(c *Context) error {
-		return approve(c)
-	},
+	Action: approve,
 }
 
 func approve(c *Context) error {

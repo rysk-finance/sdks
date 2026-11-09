@@ -1,6 +1,6 @@
 {
   "name": "ryskv12",
-  "version": "5.1.1",
+  "version": "5.2.0",
   "description": "Rysk V12 client",
   "repository": {
     "type": "git",
@@ -33,18 +33,15 @@
   ],
   "exports": {
     ".": "./dist/index.js",
-    "./models": "./dist/models.js",
-    "./nonce": "./dist/nonce.js"
+    "./models": "./dist/models.js"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "dotenv": "^16.5.0",
     "typescript": "^5.8.3"
   },
   "type": "module",
   "scripts": {
     "build": "npx tsc",
-    "upgrade": "yarn upgrade-interactive --latest",
     "postinstall": "chmod +x scripts/* && (./scripts/fetch_latest_release.sh || echo 'ryskv12: could not download the cli; run scripts/fetch_latest_release.sh, or set the cli path yourself')",
     "pretest": "npx tsc",
     "test": "node --test 'test/*.test.js'"

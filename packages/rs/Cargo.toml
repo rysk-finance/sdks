@@ -1,6 +1,6 @@
 [package]
 name = "ryskv12"
-version = "5.1.1"
+version = "5.2.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Rust sdk to interact with Rysk v12"

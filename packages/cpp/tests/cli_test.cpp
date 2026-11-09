@@ -27,6 +27,7 @@
 #include "harness.hpp"
 #include "ryskv12/client.hpp"
 #include "ryskv12/json.hpp"
+#include "trim.hpp"
 
 using namespace ryskv12;
 
@@ -221,18 +222,11 @@ class FakeApi {
   }
 };
 
-static std::string trimmed(const std::string& raw) {
-  std::size_t begin = raw.find_first_not_of(" \t\n\r");
-  if (begin == std::string::npos) return "";
-  std::size_t end = raw.find_last_not_of(" \t\n\r");
-  return raw.substr(begin, end - begin + 1);
-}
-
 TEST(the_cli_reports_a_version_the_sdk_accepts) {
   if (!have_cli()) return;
   Output out = sdk().run({"version"});
   CHECK_MSG(out.exit_code == 0, out.err);
-  CHECK_MSG(!trimmed(out.out).empty(), "version printed nothing");
+  CHECK_MSG(!trim(out.out).empty(), "version printed nothing");
 }
 
 TEST(the_cli_signs_and_posts_what_the_sdk_built) {
@@ -244,7 +238,7 @@ TEST(the_cli_signs_and_posts_what_the_sdk_built) {
   Output out = rysk.run(post_one(rysk, path, "req-1", quote(), api.url()));
   ::unlink(path.c_str());
   CHECK_MSG(out.exit_code == 0, out.err);
-  CHECK_EQ(trimmed(out.out), std::string(R"({"failures":[]})"));
+  CHECK_EQ(trim(out.out), std::string(R"({"failures":[]})"));
 
   auto calls = api.calls();
   CHECK_EQ(calls.size(), std::size_t(1));
@@ -377,8 +371,7 @@ TEST(run_lines_hands_over_each_line_as_it_arrives) {
 // this pins the wire format - one json array of args per line.
 TEST(send_writes_each_command_as_one_json_line) {
   Rysk::Options options;
-  options.cli_path = "/bin/cat";
-  options.skip_version_check = true;
+  options.cli_path = "/bin/cat";  // `cat version` fails, so the version check only warns
   Rysk rysk(Env::Testnet, PK, options);
 
   std::vector<std::string> args{"quote", "--rfq_id", "a \"quoted\"\nid", "--is_put"};
@@ -434,7 +427,7 @@ TEST(testnet_open_an_rfq_quote_cancel_requote_and_take_the_trade) {
   auto ok = [](const Rysk& rysk, const std::vector<std::string>& args) {
     Output out = rysk.run(args);
     if (out.exit_code != 0) throw std::runtime_error(args[1] + ": " + out.err + "\n" + out.out);
-    std::string text = trimmed(out.out);
+    std::string text = trim(out.out);
     auto parsed = Json::parse(text.empty() ? "[]" : text);
     return parsed ? *parsed : Json(text);
   };

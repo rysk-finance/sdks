@@ -31,8 +31,3 @@ class NonceCounter:
         with open(self._path, "w") as f:
             f.write(str(nonce))
         return str(nonce)
-
-    @property
-    def last(self) -> int:
-        """The last nonce handed out, or 0 when none has been."""
-        return self._last

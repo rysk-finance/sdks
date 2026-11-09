@@ -16,12 +16,16 @@ jobs:
         include:
           - package: ts
             path: packages/ts
+            manifest: packages/ts/package.json
           - package: py
             path: packages/py
+            manifest: packages/py/pyproject.toml
           - package: rs
             path: packages/rs
+            manifest: packages/rs/Cargo.toml
           - package: cpp
             path: packages/cpp
+            manifest: packages/cpp/CMakeLists.txt
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,12 +52,7 @@ jobs:
               cpp) sed -n 's/^ *VERSION \([0-9][^ )]*\).*/\1/p' | head -n 1 ;;
             esac
           }
-          case "${{ matrix.package }}" in
-            ts) manifest="${{ matrix.path }}/package.json" ;;
-            py) manifest="${{ matrix.path }}/pyproject.toml" ;;
-            rs) manifest="${{ matrix.path }}/Cargo.toml" ;;
-            cpp) manifest="${{ matrix.path }}/CMakeLists.txt" ;;
-          esac
+          manifest="${{ matrix.manifest }}"
 
           base=$(git show "origin/${{ github.base_ref }}:$manifest" | read_version)
           pr=$(read_version < "$manifest")

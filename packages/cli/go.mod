@@ -4,7 +4,6 @@ go 1.27.3
 
 require (
 	github.com/ethereum/go-ethereum v1.15.7
-	github.com/goccy/go-json v0.10.5
 	github.com/gorilla/websocket v1.5.3
 )
 

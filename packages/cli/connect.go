@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
 
-	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 )
 
@@ -24,9 +24,7 @@ var connectAction = &Command{
 			Usage:    "ws url to connect to",
 		},
 	},
-	Action: func(c *Context) error {
-		return connect(c)
-	},
+	Action: connect,
 }
 
 // send is where the channel commands put their payload. Run on their own they
@@ -60,21 +58,29 @@ func connect(c *Context) error {
 	if err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
-	client := NewClient(ctx, cancel, conn)
-	client.SetHandler(printLine)
+	conn.SetCloseHandler(func(code int, text string) error {
+		log.Print("connection closed by peer")
+		cancel()
+		return nil
+	})
+	// runCommands is the only goroutine that calls send, so this is the
+	// connection's single writer; pongs go out through gorilla's default ping
+	// handler, whose WriteControl is safe alongside it.
 	send = func(payload any) error {
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return fmt.Errorf("invalid payload: %v", err)
 		}
-		client.Send(data)
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			log.Fatal(err)
+		}
 		return nil
 	}
 	// stdin closing only stops commands; the connection stays up until it is
 	// killed or the server closes it, so a listen-only connect can run with
 	// stdin at /dev/null.
 	go runCommands(os.Stdin)
-	go listenMessages(client)
+	go listenMessages(conn)
 	<-ctx.Done()
 	return nil
 }
@@ -135,18 +141,12 @@ func commandID(args []string) string {
 	return args[0]
 }
 
-func listenMessages(client *Client) {
+func listenMessages(conn *websocket.Conn) {
 	for {
-		select {
-		case <-client.Ctx.Done():
-			log.Print("connection closed by peer")
-			return
-		default:
-			_, msg, err := client.Connection.ReadMessage()
-			if err != nil {
-				log.Fatalf("Read error: %s", err.Error())
-			}
-			client.Ingest(msg)
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			log.Fatalf("Read error: %s", err.Error())
 		}
+		printLine(msg)
 	}
 }

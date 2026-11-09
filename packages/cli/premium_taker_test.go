@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,9 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 // execute builds the confirmation from the api's own quote, request and pool,
@@ -71,16 +69,11 @@ func TestPremiumExecuteSignsTheStoredQuote(t *testing.T) {
 	message["chainId"] = strconv.Itoa(int(posted["chainId"].(float64)))
 	message["expiry"] = strconv.Itoa(int(posted["expiry"].(float64)))
 	domain, _ := premiumQuoteDomain(84532, &premiumDomainInput{VerifyingContract: testOptionHandler})
-	hash, err := EncodeTypedData(&apitypes.TypedData{
-		Types:       apitypes.Types{"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"], "Confirmation": confirmationType},
-		PrimaryType: "Confirmation",
-		Domain:      *domain,
-		Message:     message,
-	})
+	hash, err := confirmationHash(domain, message)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if signer := recoverSigner(t, hash.Bytes(), posted["signature"].(string)); signer != testKeyAddress(t) {
+	if signer := recoverSigner(t, hash, posted["signature"].(string)); signer != testKeyAddress(t) {
 		t.Errorf("confirmation recovers to %s, want %s", signer, testKeyAddress(t))
 	}
 }

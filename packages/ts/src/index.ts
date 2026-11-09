@@ -1,26 +1,19 @@
 import { ChildProcess, exec, spawn } from "child_process";
 import { EventEmitter } from "events";
 import { createInterface } from "readline";
-import Stream from "stream";
 
 import { HexString, Quote, Transfer } from "./models.js";
 
 class CliWebSocket extends EventEmitter {
-  private _childProcess: ChildProcess | null = null;
   private _closed = false;
-  public stdout: Stream.Readable | null;
-  public stderr: Stream.Readable | null;
 
-  constructor(childProcess: ChildProcess) {
+  constructor(private child: ChildProcess) {
     super();
-    this._childProcess = childProcess;
-    this.stdout = this._childProcess.stdout;
-    this.stderr = this._childProcess.stderr;
 
     // The CLI prints one message per line, and a chunk of stdout can hold
     // several or part of one, so each line is a message.
-    if (this._childProcess.stdout) {
-      createInterface({ input: this._childProcess.stdout }).on("line", (line) =>
+    if (this.child.stdout) {
+      createInterface({ input: this.child.stdout }).on("line", (line) =>
         this.emit("message", Buffer.from(line)),
       );
     }
@@ -28,18 +21,18 @@ class CliWebSocket extends EventEmitter {
     // The CLI logs to stderr, so it is not an error channel: a failed command
     // is a json-rpc error message (or, run on its own, a non-zero exit code),
     // and "error" is reserved for the process itself failing.
-    this._childProcess?.stderr?.on("data", (data: Buffer) => {
+    this.child.stderr?.on("data", (data: Buffer) => {
       this.emit("stderr", data);
     });
 
     // Handle process close
-    this._childProcess.on("close", (code: number, _: string) => {
+    this.child.on("close", (code: number, _: string) => {
       this._closed = true;
       this.emit("close", code, "Process exited"); // Mimicking close event with code and reason
     });
 
     // Handle process error (e.g., spawn failure)
-    this._childProcess.on("error", (err: Error) => {
+    this.child.on("error", (err: Error) => {
       this._closed = true;
       this.emit("error", err.toString());
       this.emit("close");
@@ -52,12 +45,12 @@ class CliWebSocket extends EventEmitter {
   /** Kills the CLI process, which disconnects a connect. */
   public close(): void {
     if (!this._closed) {
-      this._childProcess?.kill("SIGTERM");
+      this.child.kill("SIGTERM");
     }
   }
 
   public send(args: Array<string>): void {
-    this._childProcess?.stdin?.write(JSON.stringify(args) + "\n");
+    this.child.stdin?.write(JSON.stringify(args) + "\n");
   }
 }
 
@@ -67,22 +60,10 @@ export enum Env {
   MAINNET = 2,
 }
 
-interface EnvConfigPayload {
-  base_url: string;
-}
-
-class EnvConfig implements EnvConfigPayload {
-  public readonly base_url: string;
-
-  constructor(base_url: string) {
-    this.base_url = base_url;
-  }
-}
-
-const ENV_CONFIGS: { [key in Env]: EnvConfig } = {
-  [Env.LOCAL]: new EnvConfig("ws://localhost:8000/"),
-  [Env.TESTNET]: new EnvConfig("wss://rip-testnet.rysk.finance/"),
-  [Env.MAINNET]: new EnvConfig("wss://v12.rysk.finance/"),
+const BASE_URLS: Record<Env, string> = {
+  [Env.LOCAL]: "ws://localhost:8000/",
+  [Env.TESTNET]: "wss://rip-testnet.rysk.finance/",
+  [Env.MAINNET]: "wss://v12.rysk.finance/",
 };
 
 const RELEASES_URL = "https://github.com/rysk-finance/ryskV12/releases";
@@ -97,13 +78,7 @@ function parseVersion(raw: string): Version | null {
 
 /** Compares major, then minor, then patch - not just the first digit. */
 function compareVersions(left: Version, right: Version) {
-  const [leftMajor, leftMinor, leftPatch] = left;
-  const [rightMajor, rightMinor, rightPatch] = right;
-
-  if (leftMajor !== rightMajor) return leftMajor < rightMajor ? -1 : 1;
-  if (leftMinor !== rightMinor) return leftMinor < rightMinor ? -1 : 1;
-  if (leftPatch !== rightPatch) return leftPatch < rightPatch ? -1 : 1;
-  return 0;
+  return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
 }
 
 class Rysk {
@@ -168,7 +143,7 @@ class Rysk {
   }
 
   private _url(uri: string): string {
-    return `${ENV_CONFIGS[this._env].base_url}${uri}`;
+    return `${BASE_URLS[this._env]}${uri}`;
   }
 
   /**
@@ -281,7 +256,7 @@ class Rysk {
     return [
       "self-redeem",
       "--url",
-      url ?? ENV_CONFIGS[this._env].base_url.replace(/^ws/, "http").replace(/\/$/, ""),
+      url ?? BASE_URLS[this._env].replace(/^ws/, "http").replace(/\/$/, ""),
       "--chain_id",
       chainId.toString(),
       "--nonce",
@@ -336,41 +311,23 @@ class Rysk {
    * Base url of the premium rfq api. Left out of the args when not given, so the
    * CLI's own default (production) applies; pass it for a local or staging api.
    */
-  private _premiumURLArgs(url?: string): Array<string> {
-    return url ? ["--url", url] : [];
+  private _premium(cmd: string, url: string | undefined, ...flags: string[]) {
+    return ["premium", cmd, ...flags, ...(url ? ["--url", url] : [])];
   }
 
   /** Requests this maker may quote, each carrying the domain to sign against. */
   public premiumRequestsArgs(maker: string, url?: string) {
-    return [
-      "premium",
-      "requests",
-      "--maker",
-      maker,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("requests", url, "--maker", maker);
   }
 
   /** This maker's live quotes - the only place quote ids come from. */
   public premiumQuotesArgs(maker: string, url?: string) {
-    return [
-      "premium",
-      "quotes",
-      "--maker",
-      maker,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("quotes", url, "--maker", maker);
   }
 
   /** One quote by id, whatever its status. */
   public premiumQuoteStatusArgs(id: string, url?: string) {
-    return [
-      "premium",
-      "quote-status",
-      "--id",
-      id,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("quote-status", url, "--id", id);
   }
 
   /**
@@ -378,13 +335,7 @@ class Rysk {
    * path, or "-" for stdin. Build the file with `premiumQuoteBatch`.
    */
   public premiumQuoteBatchArgs(source: string, url?: string) {
-    return [
-      "premium",
-      "quote",
-      "--batch",
-      source,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("quote", url, "--batch", source);
   }
 
   /**
@@ -410,22 +361,12 @@ class Rysk {
     nonce: string,
     url?: string,
   ) {
-    return [
-      "premium",
-      "cancel",
-      "--id",
-      id,
-      "--chain_id",
-      chainId.toString(),
-      "--nonce",
-      nonce,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("cancel", url, "--id", id, "--chain_id", chainId.toString(), "--nonce", nonce);
   }
 
   /** Taker: the pools requests can be opened on. */
   public premiumPoolsArgs(url?: string) {
-    return ["premium", "pools", ...this._premiumURLArgs(url)];
+    return this._premium("pools", url);
   }
 
   /**
@@ -439,39 +380,17 @@ class Rysk {
     nonce: string,
     url?: string,
   ) {
-    return [
-      "premium",
-      "request",
-      "--batch",
-      source,
-      "--chain_id",
-      chainId.toString(),
-      "--nonce",
-      nonce,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("request", url, "--batch", source, "--chain_id", chainId.toString(), "--nonce", nonce);
   }
 
   /** Taker: a pool's live requests. */
   public premiumTakerRequestsArgs(taker: string, url?: string) {
-    return [
-      "premium",
-      "taker-requests",
-      "--taker",
-      taker,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("taker-requests", url, "--taker", taker);
   }
 
   /** Taker: the live quotes on one request. */
   public premiumRequestQuotesArgs(id: string, url?: string) {
-    return [
-      "premium",
-      "request-quotes",
-      "--id",
-      id,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("request-quotes", url, "--id", id);
   }
 
   /** Taker: cancels a request and every quote on it. */
@@ -481,17 +400,7 @@ class Rysk {
     nonce: string,
     url?: string,
   ) {
-    return [
-      "premium",
-      "cancel-request",
-      "--id",
-      id,
-      "--chain_id",
-      chainId.toString(),
-      "--nonce",
-      nonce,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("cancel-request", url, "--id", id, "--chain_id", chainId.toString(), "--nonce", nonce);
   }
 
   /**
@@ -499,15 +408,7 @@ class Rysk {
    * settles it on chain; it prints the transaction hash.
    */
   public premiumExecuteArgs(quoteId: string, nonce: string, url?: string) {
-    return [
-      "premium",
-      "execute",
-      "--quote_id",
-      quoteId,
-      "--nonce",
-      nonce,
-      ...this._premiumURLArgs(url),
-    ];
+    return this._premium("execute", url, "--quote_id", quoteId, "--nonce", nonce);
   }
 
   public quoteArgs(rfqId: string, quote: Quote) {

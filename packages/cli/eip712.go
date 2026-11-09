@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,7 +10,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 var ZeroAddress = common.HexToAddress("0x0")
@@ -123,7 +122,6 @@ var EIP712_TYPES = &apitypes.Types{
 	},
 }
 
-// EncodeTypedData - Encoding the typed data
 // confirmationType is the Confirmation struct a taker signs to accept a quote,
 // in v12 and premium alike. The field order is part of the typehash, so it has
 // to match the contracts' exactly.
@@ -148,17 +146,22 @@ var confirmationType = []apitypes.Type{
 }
 
 func EncodeTypedData(typedData *apitypes.TypedData) (common.Hash, error) {
-	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
-	if err != nil {
-		return common.BytesToHash([]byte{}), err
-	}
-	typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
-	if err != nil {
-		return common.BytesToHash([]byte{}), err
-	}
-	rawData := fmt.Appendf(nil, "\x19\x01%s%s", string(domainSeparator), string(typedDataHash))
-	hash := common.BytesToHash(crypto.Keccak256(rawData))
-	return hash, err
+	hash, _, err := apitypes.TypedDataAndHash(*typedData)
+	return common.BytesToHash(hash), err
+}
+
+// confirmationHash is the digest a taker signs to accept a quote.
+func confirmationHash(domain *apitypes.TypedDataDomain, message map[string]any) ([]byte, error) {
+	hash, err := EncodeTypedData(&apitypes.TypedData{
+		Types: apitypes.Types{
+			"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"],
+			"Confirmation": confirmationType,
+		},
+		PrimaryType: "Confirmation",
+		Domain:      *domain,
+		Message:     message,
+	})
+	return hash.Bytes(), err
 }
 
 // Signs msg with EIP712 signing scheme
@@ -167,21 +170,12 @@ func Sign(message []byte, privateKey string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sigBytes, err := signTypedData(message, privateKeyEcdsa)
+	sig, err := crypto.Sign(message, privateKeyEcdsa)
 	if err != nil {
 		return "", err
 	}
-	signature := fmt.Sprintf("0x%s", common.Bytes2Hex(sigBytes))
-	return signature, nil
-}
-
-func signTypedData(message []byte, privateKey *ecdsa.PrivateKey) (sig []byte, err error) {
-	sig, err = crypto.Sign(message, privateKey)
-	if err != nil {
-		return sig, err
-	}
 	sig[64] += 27
-	return
+	return fmt.Sprintf("0x%s", common.Bytes2Hex(sig)), nil
 }
 
 func createEIP712Domain(chainId int64) *apitypes.TypedDataDomain {
@@ -250,49 +244,36 @@ func createEIP712TypedData(domain *apitypes.TypedDataDomain, msgType string, msg
 }
 
 // CreateQuoteMessage hashes q for signing. A nil domain uses the default domain
-// for the quote's chain.
-func CreateQuoteMessage(q Quote, domain *apitypes.TypedDataDomain) (messageHash []byte, typedData *apitypes.TypedData, err error) {
-	msg, _ := json.Marshal(q)
-	var imessage map[string]interface{}
-	json.Unmarshal(msg, &imessage)
-	// remove fields that are not part of the signed Quote type
-	delete(imessage, "signature")
-	delete(imessage, "premiumAsset")
+// for the quote's chain. premiumAsset is not part of the signed Quote type.
+func CreateQuoteMessage(q Quote, domain *apitypes.TypedDataDomain) ([]byte, *apitypes.TypedData, error) {
 	if domain == nil {
 		domain = createEIP712Domain(int64(q.ChainID))
 	}
-	typedData = createEIP712TypedData(domain, "Quote", imessage)
-	hash, err := EncodeTypedData(typedData)
-	if err != nil {
-		return nil, typedData, err
-	}
-	messageHash = hash.Bytes()
-	return messageHash, typedData, nil
+	return hashMessage(q, domain, "Quote", "signature", "premiumAsset")
 }
 
-func CreateTransferMessage(t Transfer) (messageHash []byte, typedData *apitypes.TypedData, err error) {
-	msg, _ := json.Marshal(t)
-	var imessage map[string]interface{}
-	json.Unmarshal(msg, &imessage)
-	// remove extra fields
-	delete(imessage, "signature")
-	typedData = createEIP712TypedData(createEIP712Domain(int64(t.ChainID)), "Transfer", imessage)
-	hash, err := EncodeTypedData(typedData)
-	if err != nil {
-		return nil, typedData, err
-	}
-	messageHash = hash.Bytes()
-	return messageHash, typedData, nil
+func CreateTransferMessage(t Transfer) ([]byte, *apitypes.TypedData, error) {
+	return hashMessage(t, createEIP712Domain(int64(t.ChainID)), "Transfer", "signature")
 }
 
 func CreateWillRedeemMessage(w WillRedeem) ([]byte, error) {
-	msg, _ := json.Marshal(w)
-	var imessage map[string]interface{}
-	json.Unmarshal(msg, &imessage)
-	delete(imessage, "signature")
-	hash, err := EncodeTypedData(createEIP712TypedData(createEIP712Domain(int64(w.ChainID)), "WillRedeem", imessage))
-	if err != nil {
-		return nil, err
+	hash, _, err := hashMessage(w, createEIP712Domain(int64(w.ChainID)), "WillRedeem", "signature")
+	return hash, err
+}
+
+// hashMessage hashes v, as its json, as a primaryType under domain, leaving out
+// the fields in drop that are not part of the signed type.
+func hashMessage(v any, domain *apitypes.TypedDataDomain, primaryType string, drop ...string) ([]byte, *apitypes.TypedData, error) {
+	msg, _ := json.Marshal(v)
+	var message map[string]interface{}
+	json.Unmarshal(msg, &message)
+	for _, field := range drop {
+		delete(message, field)
 	}
-	return hash.Bytes(), nil
+	typedData := createEIP712TypedData(domain, primaryType, message)
+	hash, err := EncodeTypedData(typedData)
+	if err != nil {
+		return nil, typedData, err
+	}
+	return hash.Bytes(), typedData, nil
 }

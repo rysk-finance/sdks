@@ -149,30 +149,6 @@ TEST(an_optional_field_may_be_absent_but_not_wrong) {
              .has_value());
 }
 
-TEST(transfer_round_trips_as_the_camel_case_the_cli_marshals) {
-  Transfer transfer;
-  transfer.user = MAKER;
-  transfer.amount = "1";
-  transfer.asset = ASSET;
-  transfer.chain_id = 84532;
-  transfer.is_deposit = true;
-  transfer.nonce = "1";
-
-  Json value = transfer.to_json();
-  // the cli's struct tags say chainId and isDeposit, not chain_id
-  CHECK_EQ(value["chainId"].as_int(), std::optional<std::int64_t>(84532));
-  CHECK_EQ(value["isDeposit"].as_bool(), std::optional<bool>(true));
-  CHECK(!value.contains("chain_id"));
-  CHECK(!value.contains("is_deposit"));
-
-  auto back = Transfer::from_json(value);
-  CHECK(back.has_value());
-  if (!back) return;
-  CHECK_EQ(back->chain_id, std::int64_t(84532));
-  CHECK_EQ(back->is_deposit, true);
-  CHECK_EQ(back->user, std::string(MAKER));
-}
-
 TEST(a_successful_response_carries_a_result_and_no_error) {
   auto res = JsonRpcResponse::parse(R"({"jsonrpc":"2.0","id":"7","result":{"ok":true}})");
   CHECK(res.has_value());
