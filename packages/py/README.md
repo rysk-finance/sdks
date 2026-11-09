@@ -11,8 +11,8 @@ Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/p
     ```bash
     poetry add ryskV12
     ```
-3.  **Download the `ryskV12` CLI:**
-    Navigate to https://github.com/rysk-finance/ryskV12/releases and download the latest release in the root directory of your project as `ryskV12`.
+3.  **Get the `ryskV12` CLI:** call `Rysk(...).setup()` (see below), or download the newest `cli-v*`
+    release from https://github.com/rysk-finance/sdks/releases into your project as `ryskV12`.
 
 ## Run
 

@@ -6,8 +6,8 @@ Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/p
 
 ## Setup
 
-The package comes with a postinstall script that automatically pulls the [latest release of `ryskV12 cli`](https://github.com/rysk-finance/ryskV12/releases).
-If the script fails to do so please navigate to https://github.com/rysk-finance/ryskV12/releases and download the latest release in your project directory as `ryskV12`.
+The package comes with a postinstall script that automatically pulls the [latest release of `ryskV12 cli`](https://github.com/rysk-finance/sdks/releases).
+If the script fails to do so please navigate to https://github.com/rysk-finance/sdks/releases and download the newest `cli-v*` release into your project directory as `ryskV12`.
 
 ## Run
 

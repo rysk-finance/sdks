@@ -1,4 +1,4 @@
-module github.com/rysk-finance/ryskV12/packages/cli
+module github.com/rysk-finance/sdks/packages/cli
 
 go 1.27.3
 

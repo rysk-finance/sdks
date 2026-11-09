@@ -66,7 +66,7 @@ const BASE_URLS: Record<Env, string> = {
   [Env.MAINNET]: "wss://v12.rysk.finance/",
 };
 
-const RELEASES_URL = "https://github.com/rysk-finance/ryskV12/releases";
+const RELEASES_URL = "https://github.com/rysk-finance/sdks/releases";
 
 type Version = [number, number, number];
 
