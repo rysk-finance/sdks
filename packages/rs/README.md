@@ -7,6 +7,8 @@ It builds argument lists for the `ryskV12` cli and spawns it, so the cli keeps
 ownership of the signing key, the websocket and the eip712 signing, and all
 three sdks agree on flags by construction.
 
+Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/premium.md).
+
 ## Install
 
 ```toml
@@ -150,7 +152,7 @@ predicates the other two hand-write: deserialisation already checks the shape.
 
 A nonce is spent once per address, and the api keys them on (address, nonce)
 alone, so quotes, cancels and confirmations from one signing key all draw from
-the same sequence. [`NonceCounter`] persists to a file so a restart cannot
+the same sequence. `NonceCounter` persists to a file so a restart cannot
 rewind into nonces the api has already seen.
 
 ## Development

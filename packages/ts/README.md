@@ -2,6 +2,8 @@
 
 Node wrapper for ryskV12 cli
 
+Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/premium.md).
+
 ## Setup
 
 The package comes with a postinstall script that automatically pulls the [latest release of `ryskV12 cli`](https://github.com/rysk-finance/ryskV12/releases).
@@ -22,22 +24,6 @@ If the script fails to do so please navigate to https://github.com/rysk-finance/
 | `error` | the process itself failed to spawn or run |
 
 `send(args)` writes a command into a running `connect` (see below), and `close()` ends the process.
-
-### Core `execute` method
-
-The `execute` method spawns a subprocess and returns it.
-You can then attach listeners to the process to capture `stdout`, `stderr` and events like "close" and "error".
-
-```ts
-// ...
-  public execute(args: Array<string> = []): ChildProcessWithoutNullStreams {
-    return spawn(this._cli_path, args, {
-      shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  }
-//...
-```
 
 ### The private key never reaches argv
 
@@ -109,6 +95,7 @@ makerProc.send(ryskSDK.balancesArgs("0xabc"));
 
 ```ts
 const transferDetails: Transfer = {
+  user: "0xabc", // the maker
   amount: "500000",
   asset: "0x...", // The asset address
   chain_id: 84532,
@@ -140,7 +127,7 @@ ryskSDK.execute(ryskSDK.selfRedeemArgs(84532, "46", 1767225600, ["0xasset"]));
 ### Send a Quote
 
 ```ts
-const request_id = "some-uuid-from-server";
+const request_id = "some-uuid-from-server"; // the rfq id; request is the rfq itself
 const quoteDetails: Quote = {
   assetAddress: "0x...",
   chainId: 84532,
@@ -149,9 +136,9 @@ const quoteDetails: Quote = {
   isTakerBuy: true,
   maker: "0x...",
   nonce: "another-unique-nonce",
-  price: "0.01",
-  quantity: "1",
-  strike: "1000000",
+  price: "1250000000000000000", // USD per option, 1e18
+  quantity: "1000000000000000000", // 1e18
+  strike: "350000000000", // 1e8
   validUntil: 1678886460,
   usd: "0x...",
   collateralAsset: "0x....",

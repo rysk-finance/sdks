@@ -9,6 +9,8 @@ on flags by construction.
 
 C++17, posix, and **no third party dependencies** — not even for json or tests.
 
+Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/premium.md).
+
 ## Building
 
 ```sh
@@ -42,6 +44,8 @@ Rysk::Options options;
 options.cli_path = "./ryskV12";
 options.strict_version = true;  // throw rather than warn on an old cli
 Rysk sdk(Env::Testnet, private_key, options);
+// the premium api: Env does not choose it, and without a url the cli uses production
+const std::string url = "https://insti-testnet.rysk.finance";
 
 NonceCounter nonces;
 
@@ -63,7 +67,7 @@ quote.domain        = request.type_data_domain;
 
 // one quote or a whole strip, in one api call
 std::ofstream("batch.json") << sdk.premium_quote_batch({{request_id, quote}});
-Output result = sdk.run(sdk.premium_quote_batch_args("batch.json"));
+Output result = sdk.run(sdk.premium_quote_batch_args("batch.json", url));
 if (result.exit_code != 0) std::cerr << result.err << "\n";
 ```
 
@@ -78,14 +82,14 @@ rfq signers. A request's `validUntil` is in **milliseconds**; see the cli README
 for its fields.
 
 ```cpp
-sdk.run(sdk.premium_pools_args());
+sdk.run(sdk.premium_pools_args(url));
 // a json array of requests as the api takes them; answers with no body
-sdk.run(sdk.premium_request_args("requests.json", chain_id, nonce_a));
-sdk.run(sdk.premium_taker_requests_args(pool));        // the pool's live requests
-sdk.run(sdk.premium_request_quotes_args(request_id));  // the quotes on one
-sdk.run(sdk.premium_cancel_request_args(request_id, chain_id, nonce_b));
+sdk.run(sdk.premium_request_args("requests.json", chain_id, nonce_a, url));
+sdk.run(sdk.premium_taker_requests_args(pool, url));        // the pool's live requests
+sdk.run(sdk.premium_request_quotes_args(request_id, url));  // the quotes on one
+sdk.run(sdk.premium_cancel_request_args(request_id, chain_id, nonce_b, url));
 // take a quote: prints the settling transaction's hash
-Output taken = sdk.run(sdk.premium_execute_args(quote_id, nonce_c));
+Output taken = sdk.run(sdk.premium_execute_args(quote_id, nonce_c, url));
 ```
 
 ## Approving and depositing

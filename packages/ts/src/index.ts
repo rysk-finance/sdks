@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import { createInterface } from "readline";
 import Stream from "stream";
 
-import { HexString, Quote, Transfer } from "./models";
+import { HexString, Quote, Transfer } from "./models.js";
 
 class CliWebSocket extends EventEmitter {
   private _childProcess: ChildProcess | null = null;
