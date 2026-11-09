@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "ryskV12"
-version = "5.2.0"
+version = "5.2.1"
 description = "Python sdk to interact with Rysk v12"
 authors = ["thundering-silence <jack@rysk.finance>"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://rysk.finance"
-repository = "https://github.com/rysk-finance/ryskV12"
+repository = "https://github.com/rysk-finance/sdks"
 packages = [{include = "ryskV12"}]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -15,8 +15,8 @@ classifiers = [
 ]
 
 [tool.poetry.urls]
-Issues = "https://github.com/rysk-finance/ryskV12/issues"
-"CLI Download" = "https://github.com/rysk-finance/ryskV12/releases"
+Issues = "https://github.com/rysk-finance/sdks/issues"
+"CLI Download" = "https://github.com/rysk-finance/sdks/releases"
 
 [tool.poetry.dependencies]
 python = "^3.11"

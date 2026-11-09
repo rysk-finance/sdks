@@ -1,0 +1,53 @@
+name: Release C++ SDK
+
+# The c++ sdk ships as source: a release is the cpp-vX.Y.Z tag that
+# FetchContent or a submodule pins to.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cpp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get current version
+        id: v
+        run: echo "version=$(sed -n 's/^ *VERSION \([0-9][^ )]*\).*/\1/p' CMakeLists.txt | head -n 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to republish a version
+        run: |
+          if git rev-parse -q --verify "refs/tags/cpp-v${{ steps.v.outputs.version }}" >/dev/null; then
+            echo "::error::cpp-v${{ steps.v.outputs.version }} is already released; bump CMakeLists.txt first."
+            exit 1
+          fi
+
+      - name: Require a published CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          min=$(sed -n 's/.*kMinCliVersion{\([0-9]*\), \([0-9]*\), \([0-9]*\)}.*/\1.\2.\3/p' src/client.cpp)
+          [ -n "$min" ] || { echo "::error::could not read kMinCliVersion from src/client.cpp"; exit 1; }
+          "$GITHUB_WORKSPACE/scripts/require-cli.sh" "$min" "${{ github.repository }}"
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cpp-v${{ steps.v.outputs.version }}
+          name: C++ SDK v${{ steps.v.outputs.version }}
+          target_commitish: main

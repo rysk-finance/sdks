@@ -1,14 +1,14 @@
 {
   "name": "ryskv12",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "Rysk V12 client",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rysk-finance/ryskV12.git",
+    "url": "https://github.com/rysk-finance/sdks.git",
     "directory": "packages/ts"
   },
   "homepage": "https://rysk.finance/",
-  "bugs": "https://github.com/rysk-finance/ryskV12/issues",
+  "bugs": "https://github.com/rysk-finance/sdks/issues",
   "author": {
     "email": "jack@rysk.finance",
     "name": "thundering-silence"

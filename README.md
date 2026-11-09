@@ -62,7 +62,7 @@ publishes on a merge.
 
 ## Publishing credentials
 
-npm and PyPI publish over OIDC trusted publishing — there is no long lived token
+npm, PyPI and crates.io publish over OIDC trusted publishing — there is no long lived token
 in the repo. Each registry's trusted publisher must name this repository and the
 workflow file that publishes it:
 
@@ -70,6 +70,13 @@ workflow file that publishes it:
 | --- | --- | --- |
 | PyPI | `py-release.yaml` | `pypi` |
 | npm | `ts-release.yaml` | none |
+| crates.io | `rs-release.yaml` | `crates-io` |
+
+crates.io only takes a trusted publisher for a crate that already exists, so the
+first `ryskv12` release uses an api token: put it in a `CARGO_REGISTRY_TOKEN`
+secret on the `crates-io` environment and run the workflow. Then add the trusted
+publisher and delete the secret. The C++ SDK publishes nothing: its
+workflow only tags `cpp-vX.Y.Z` for FetchContent or a submodule to pin.
 
 The environment is part of the OIDC claim, so a publisher configured with the
 wrong one — or with none where the job declares one — is rejected.

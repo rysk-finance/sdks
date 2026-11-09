@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 from .models import Quote, Transfer
 
 
-RELEASES_URL = "https://github.com/rysk-finance/ryskV12/releases"
+RELEASES_URL = "https://github.com/rysk-finance/sdks/releases"
 
 
 def _parse_version(raw: str) -> Optional[Tuple[int, int, int]]:
