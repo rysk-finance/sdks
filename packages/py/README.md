@@ -204,6 +204,7 @@ proc = rysk_sdk.execute(rysk_sdk.premium_quote_batch_args("batch.json"))
 # your live quotes (the only source of quote ids), one quote, and a cancel
 rysk_sdk.execute(rysk_sdk.premium_quotes_args(maker))
 rysk_sdk.execute(rysk_sdk.premium_quote_status_args(quote_id))
+rysk_sdk.execute(rysk_sdk.premium_trades_args(maker))  # settled fills, newest first
 rysk_sdk.execute(rysk_sdk.premium_cancel_args(quote_id, chain_id, "43"))
 ```
 

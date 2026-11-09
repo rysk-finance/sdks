@@ -41,7 +41,7 @@ class Rysk:
     _env: Env
     _cli_path: str
     _private_key: str
-    _min_sdk_version: str = "5.1.0"
+    _min_sdk_version: str = "5.3.0"
 
     def __init__(
         self,
@@ -272,6 +272,21 @@ class Rysk:
     def premium_quotes_args(self, maker: str, url: Optional[str] = None):
         """This maker's live quotes - the only place quote ids come from."""
         return self._premium("quotes", url, "--maker", maker)
+
+    def premium_trades_args(
+        self,
+        account: str,
+        chain_id: Optional[int] = None,
+        pool: Optional[str] = None,
+        url: Optional[str] = None,
+    ):
+        """An account's settled trades, newest first, indexed from the chain: how a maker learns which of its quotes were filled."""
+        flags = ["--account", account]
+        if chain_id:
+            flags += ["--chain_id", str(chain_id)]
+        if pool:
+            flags += ["--pool", pool]
+        return self._premium("trades", url, *flags)
 
     def premium_quote_status_args(self, id: str, url: Optional[str] = None):
         """One quote by id, whatever its status."""

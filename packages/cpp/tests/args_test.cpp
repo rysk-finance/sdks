@@ -80,6 +80,14 @@ TEST(will_redeem_and_self_redeem_spell_the_cli_flags) {
   CHECK_EQ(flag_value(full, "--exclude_assets"), std::string(ASSET) + "," + MAKER);
 }
 
+TEST(premium_trades_filters_only_when_given) {
+  CHECK_EQ(sdk().premium_trades_args(MAKER),
+           (std::vector<std::string>{"premium", "trades", "--account", MAKER}));
+  CHECK_EQ(sdk().premium_trades_args(MAKER, 84532, std::string("0x6e37fb1f933f53f389a072277d7f942593a760dd"), std::string("http://x")),
+           (std::vector<std::string>{"premium", "trades", "--account", MAKER, "--chain_id", "84532",
+                                     "--pool", "0x6e37fb1f933f53f389a072277d7f942593a760dd", "--url", "http://x"}));
+}
+
 TEST(every_env_has_its_own_url) {
   CHECK_EQ(std::string(base_url(Env::Local)), std::string("ws://localhost:8000/"));
   CHECK_EQ(std::string(base_url(Env::Testnet)), std::string("wss://rip-testnet.rysk.finance/"));

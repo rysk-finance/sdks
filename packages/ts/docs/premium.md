@@ -113,11 +113,15 @@ const mine = batch[0].quote;
 const quoteId = String(book.find((q: any) => String(q.nonce) === mine.nonce).id);
 
 await run(maker, maker.premiumQuoteStatusArgs(quoteId, URL));
+await run(maker, maker.premiumTradesArgs(MAKER, CHAIN_ID, undefined, URL)); // settled fills
 await run(maker, maker.premiumCancelArgs(quoteId, CHAIN_ID, nonces.next(), URL));
 ```
 
 A quote lives until taken, cancelled or past `validUntil`; requote inside the
 10 minute window to keep a price standing.
+
+To learn which quotes were filled, poll the settled trades, newest first. A
+row carries the option, quantity and `txHash`, but not the quote id.
 
 ## 4. Taker: take a quote
 

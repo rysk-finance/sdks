@@ -46,6 +46,7 @@ var premiumAction = &Command{
 		premiumQuotesAction,
 		premiumQuoteStatusAction,
 		premiumCancelAction,
+		premiumTradesAction,
 		// taker
 		premiumPoolsAction,
 		premiumRequestAction,
@@ -79,6 +80,33 @@ var premiumRequestsAction = &Command{
 	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("maker"))}}
 		return premiumProxy(c, http.MethodGet, "/api/requests/maker", query, nil, nil)
+	},
+}
+
+// premiumTradesAction lists an account's settled trades, indexed from the chain,
+// newest first. It is how a maker learns which of its quotes were filled.
+var premiumTradesAction = &Command{
+	Name:  "trades",
+	Usage: "list an account's settled trades, newest first",
+	Flags: []Flag{
+		premiumURLFlag(),
+		&StringFlag{
+			Name:     "account",
+			Required: true,
+			Usage:    "counterparty address, usually the maker",
+		},
+		&IntFlag{Name: "chain_id", Usage: "only trades on this chain"},
+		&StringFlag{Name: "pool", Usage: "only trades with this pool"},
+	},
+	Action: func(c *Context) error {
+		query := url.Values{"account": {strings.ToLower(c.String("account"))}}
+		if id := c.Int("chain_id"); id != 0 {
+			query.Set("chainId", strconv.Itoa(id))
+		}
+		if pool := c.String("pool"); pool != "" {
+			query.Set("pool", strings.ToLower(pool))
+		}
+		return premiumProxy(c, http.MethodGet, "/api/trades", query, nil, nil)
 	},
 }
 

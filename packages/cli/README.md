@@ -211,6 +211,7 @@ missing id.
 ./ryskV12 premium requests --maker <0xmaker>
 ./ryskV12 premium quotes --maker <0xmaker>
 ./ryskV12 premium quote-status --id <quote_id>
+./ryskV12 premium trades --account <0xmaker> [--chain_id <chain_id>] [--pool <0xpool>]
 ./ryskV12 premium quote --batch <file|-> --private_key <pk>
 ./ryskV12 premium cancel --id <quote_id> --chain_id <chain_id> --nonce <nonce> --private_key <pk>
 ```
@@ -220,6 +221,7 @@ missing id.
 | `requests` | `GET /api/requests/maker?address=` — the requests this maker may quote, each with the `typeDataDomain` to sign against |
 | `quotes` | `GET /api/quotes?address=` — this maker's live quotes, and the only place quote ids come from |
 | `quote-status` | `GET /api/quotes/{id}` — one quote, whatever its status |
+| `trades` | `GET /api/trades?account=` — the account's settled trades, newest first; how a maker learns it was filled |
 | `quote` | `POST /api/quotes` — sign and post a batch of quotes in one call |
 | `cancel` | `DELETE /api/quotes/{id}` — pull a quote, authenticated with EIP712 headers |
 

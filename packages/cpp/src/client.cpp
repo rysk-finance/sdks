@@ -25,7 +25,7 @@ const char* const kReleasesUrl = "https://github.com/rysk-finance/sdks/releases"
 namespace {
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks.
-constexpr std::array<int, 3> kMinCliVersion{5, 1, 0};
+constexpr std::array<int, 3> kMinCliVersion{5, 3, 0};
 
 void pair(std::vector<std::string>& args, const char* flag, std::string value) {
   args.emplace_back(flag);
@@ -275,6 +275,16 @@ std::vector<std::string> Rysk::premium_requests_args(const std::string& maker,
 std::vector<std::string> Rysk::premium_quotes_args(const std::string& maker,
                                                    std::optional<std::string> url) const {
   return premium("quotes", {"--maker", maker}, url);
+}
+
+std::vector<std::string> Rysk::premium_trades_args(const std::string& account,
+                                                   std::optional<std::int64_t> chain_id,
+                                                   std::optional<std::string> pool,
+                                                   std::optional<std::string> url) const {
+  std::vector<std::string> flags = {"--account", account};
+  if (chain_id && *chain_id != 0) pair(flags, "--chain_id", std::to_string(*chain_id));
+  if (set(pool)) pair(flags, "--pool", *pool);
+  return premium("trades", std::move(flags), url);
 }
 
 std::vector<std::string> Rysk::premium_quote_status_args(const std::string& id,

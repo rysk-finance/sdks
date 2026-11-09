@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(ryskv12
-  VERSION 5.2.0
+  VERSION 5.3.0
   DESCRIPTION "C++ sdk to interact with Rysk v12"
   LANGUAGES CXX)
 

@@ -401,3 +401,10 @@ def test_will_redeem_and_self_redeem(sdk):
     assert sdk.self_redeem_args(84532, "8", 1767225600, [ASSET, MAKER], "http://x")[2:] == [
         "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", f"{ASSET},{MAKER}",
     ]
+
+
+def test_premium_trades_filters_only_when_given(sdk):
+    assert sdk.premium_trades_args(MAKER) == ["premium", "trades", "--account", MAKER]
+    assert sdk.premium_trades_args(MAKER, 84532, "0x6e37fb1f933f53f389a072277d7f942593a760dd", "http://x") == [
+        "premium", "trades", "--account", MAKER, "--chain_id", "84532", "--pool", "0x6e37fb1f933f53f389a072277d7f942593a760dd", "--url", "http://x",
+    ]

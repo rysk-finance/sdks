@@ -145,11 +145,15 @@ for (const Json& q : as_list(maker, maker.premium_quotes_args(MAKER, URL)))
   if (text(q["nonce"]) == batch[0].second.nonce) quote_id = text(q["id"]);
 
 ok(maker, maker.premium_quote_status_args(quote_id, URL));
+ok(maker, maker.premium_trades_args(MAKER, CHAIN_ID, std::nullopt, URL));  // settled fills
 ok(maker, maker.premium_cancel_args(quote_id, CHAIN_ID, nonces.next(), URL));
 ```
 
 A quote lives until taken, cancelled or past `valid_until`; requote inside the
 10 minute window to keep a price standing.
+
+To learn which quotes were filled, poll the settled trades, newest first. A
+row carries the option, quantity and `txHash`, but not the quote id.
 
 ## 4. Taker: take a quote
 
