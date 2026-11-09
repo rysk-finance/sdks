@@ -73,8 +73,9 @@ workflow file that publishes it:
 | crates.io | `rs-release.yaml` | `crates-io` |
 
 crates.io only takes a trusted publisher for a crate that already exists, so the
-first `ryskv12` release is a manual `cargo publish` with an api token; the
-workflow publishes every one after it. The C++ SDK publishes nothing: its
+first `ryskv12` release uses an api token: put it in a `CARGO_REGISTRY_TOKEN`
+secret on the `crates-io` environment and run the workflow. Then add the trusted
+publisher and delete the secret. The C++ SDK publishes nothing: its
 workflow only tags `cpp-vX.Y.Z` for FetchContent or a submodule to pin.
 
 The environment is part of the OIDC claim, so a publisher configured with the

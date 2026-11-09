@@ -56,11 +56,16 @@ jobs:
       # Exchanges this job's oidc token for a short lived crates.io token. The
       # trusted publisher on crates.io must name this repo, this workflow file
       # and the crates-io environment. crates.io only allows that on a crate
-      # that exists, so the very first publish is a manual `cargo publish`.
+      # that exists, so the first publish falls back to a CARGO_REGISTRY_TOKEN
+      # secret on the crates-io environment; delete the secret once the
+      # trusted publisher is set up.
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
+        continue-on-error: true
 
       - name: Publish to crates.io
-        run: cargo publish --locked
+        run: |
+          [ -n "$CARGO_REGISTRY_TOKEN" ] || { echo "::error::no trusted publisher and no CARGO_REGISTRY_TOKEN secret"; exit 1; }
+          cargo publish --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
