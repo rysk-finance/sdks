@@ -3,6 +3,8 @@
 #include <cerrno>
 #include <cstdlib>
 
+#include "trim.hpp"
+
 namespace ryskv12 {
 namespace {
 
@@ -58,11 +60,7 @@ void put(Json::Object& object, const char* key, const std::optional<std::string>
 }  // namespace
 
 std::optional<std::int64_t> chain_id_value(const std::string& raw) {
-  std::string text = raw;
-  std::size_t begin = text.find_first_not_of(" \t\n\r");
-  if (begin == std::string::npos) return std::nullopt;
-  std::size_t end = text.find_last_not_of(" \t\n\r");
-  text = text.substr(begin, end - begin + 1);
+  std::string text = trim(raw);
   if (text.empty()) return std::nullopt;
 
   int base = 10;
@@ -197,31 +195,6 @@ std::optional<QuoteNotification> QuoteNotification::from_json(const Json& value)
   if (!need_string(value, "newBest", note.new_best)) return std::nullopt;
   if (!need_string(value, "yours", note.yours)) return std::nullopt;
   return note;
-}
-
-// ------------------------------------------------------------------- Transfer
-
-Json Transfer::to_json() const {
-  Json::Object object;
-  object["user"] = Json(user);
-  object["amount"] = Json(amount);
-  object["asset"] = Json(asset);
-  object["chainId"] = Json(chain_id);
-  object["isDeposit"] = Json(is_deposit);
-  object["nonce"] = Json(nonce);
-  return Json(std::move(object));
-}
-
-std::optional<Transfer> Transfer::from_json(const Json& value) {
-  if (!value.is_object()) return std::nullopt;
-  Transfer transfer;
-  if (!need_string(value, "user", transfer.user)) return std::nullopt;
-  if (!need_string(value, "amount", transfer.amount)) return std::nullopt;
-  if (!need_string(value, "asset", transfer.asset)) return std::nullopt;
-  if (!need_int(value, "chainId", transfer.chain_id)) return std::nullopt;
-  if (!need_bool(value, "isDeposit", transfer.is_deposit)) return std::nullopt;
-  if (!need_string(value, "nonce", transfer.nonce)) return std::nullopt;
-  return transfer;
 }
 
 // ------------------------------------------------------------------ responses

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"math/big"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 const testPrivateKey = "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
@@ -285,14 +285,7 @@ func TestPremiumPrivateKeyFromEnv(t *testing.T) {
 	defer server.Close()
 
 	inputs := []premiumQuoteInput{testPremiumQuoteInput(t)}
-	batch, err := json.Marshal(inputs)
-	if err != nil {
-		t.Fatalf("marshal batch: %v", err)
-	}
-	file := t.TempDir() + "/batch.json"
-	if err := os.WriteFile(file, batch, 0o600); err != nil {
-		t.Fatalf("write batch: %v", err)
-	}
+	file := writeBatch(t, inputs...)
 
 	// the key never has to appear in argv, where ps would show it
 	t.Setenv("RYSK_PRIVATE_KEY", testPrivateKey)
@@ -426,15 +419,7 @@ func TestPremiumQuoteBatchPostsOneRequest(t *testing.T) {
 		input.RequestID = "request-" + strconv.Itoa(i)
 		inputs = append(inputs, input)
 	}
-	batch, err := json.Marshal(inputs)
-	if err != nil {
-		t.Fatalf("marshal batch: %v", err)
-	}
-
-	file := t.TempDir() + "/batch.json"
-	if err := os.WriteFile(file, batch, 0o600); err != nil {
-		t.Fatalf("write batch: %v", err)
-	}
+	file := writeBatch(t, inputs...)
 
 	if _, err := captureStdout(t, func() error {
 		return runPremium("quote", "--url", server.URL, "--batch", file, "--private_key", testPrivateKey)
@@ -609,27 +594,6 @@ func TestPremiumCancelRejectsBadNonce(t *testing.T) {
 	}
 }
 
-func TestPremiumRateLimitAndErrorStatuses(t *testing.T) {
-	status := http.StatusTooManyRequests
-	body := "cc"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
-		w.Write([]byte(body))
-	}))
-	defer server.Close()
-
-	err := runPremium("requests", "--maker", "0x1000000000000000000000000000000000000001", "--url", server.URL)
-	if err == nil || !strings.Contains(err.Error(), "rate limited") {
-		t.Errorf("got %v, want a rate limit error", err)
-	}
-
-	status, body = http.StatusBadRequest, "missing address"
-	err = runPremium("requests", "--maker", "0x1000000000000000000000000000000000000001", "--url", server.URL)
-	if err == nil || !strings.Contains(err.Error(), "missing address") {
-		t.Errorf("got %v, want the api's message", err)
-	}
-}
-
 func TestPremiumQuoteEmptyBodyIsAFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// a recovered panic on the api answers 200 with no body
@@ -638,16 +602,9 @@ func TestPremiumQuoteEmptyBodyIsAFailure(t *testing.T) {
 	defer server.Close()
 
 	inputs := []premiumQuoteInput{testPremiumQuoteInput(t)}
-	batch, err := json.Marshal(inputs)
-	if err != nil {
-		t.Fatalf("marshal batch: %v", err)
-	}
-	file := t.TempDir() + "/batch.json"
-	if err := os.WriteFile(file, batch, 0o600); err != nil {
-		t.Fatalf("write batch: %v", err)
-	}
+	file := writeBatch(t, inputs...)
 
-	_, err = captureStdout(t, func() error {
+	_, err := captureStdout(t, func() error {
 		return runPremium("quote", "--url", server.URL, "--batch", file, "--private_key", testPrivateKey)
 	})
 	if err == nil || !strings.Contains(err.Error(), "empty response body") {

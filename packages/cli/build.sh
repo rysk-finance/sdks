@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 VERSION="${VERSION:-dev}"
 
@@ -16,10 +17,6 @@ for platform in "${platforms[@]}"; do
   arch=$(echo "$platform" | cut -d'/' -f2)
   output="ryskV12-$os-$arch"
 
-  if [[ "$os" == "windows" ]]; then
-    output="$output.exe"
-  fi
-
   echo "Building for $os/$arch..."
   # CGO_ENABLED=0 for every target, not just the cross compiled ones: a native
   # build defaults to cgo, which links the host's libc through net's resolver and
@@ -30,10 +27,6 @@ for platform in "${platforms[@]}"; do
     -trimpath \
     -ldflags="-X 'main.Version=${VERSION}'" \
     -o "$output"
-  if [ $? -ne 0 ]; then
-    echo "Failed to build for $os/$arch"
-    exit 1
-  fi
   echo "Build for $os/$arch successful: $output"
 done
 

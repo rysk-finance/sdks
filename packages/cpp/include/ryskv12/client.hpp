@@ -85,14 +85,10 @@ class Rysk {
     std::string cli_path = "./ryskV12";
     /// Throw instead of warning when the cli is older than this sdk needs.
     bool strict_version = false;
-    /// Skip the startup version check entirely. Only for tests.
-    bool skip_version_check = false;
   };
 
   Rysk(Env env, std::string private_key, Options options);
   Rysk(Env env, std::string private_key);
-
-  const std::string& cli_path() const { return cli_path_; }
 
   // ------------------------------------------------------------ arg builders
 
@@ -201,7 +197,6 @@ class Rysk {
 
   std::string url(const std::string& uri) const;
   std::vector<std::string> domain_args(const Quote& quote, bool premium) const;
-  std::vector<std::string> premium_url_args(const std::optional<std::string>& url) const;
   void version_check() const;
   void report_version(const std::string& found) const;
 };

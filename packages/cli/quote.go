@@ -89,9 +89,7 @@ var quoteAction = &Command{
 			Usage: "EIP712 domain verifying contract, required with the other domain flags",
 		},
 	},
-	Action: func(c *Context) error {
-		return quote(c)
-	},
+	Action: quote,
 }
 
 func quote(c *Context) error {

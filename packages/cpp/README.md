@@ -167,8 +167,8 @@ into nonces the api has already seen.
 | `include/ryskv12/nonce.hpp` | the file backed nonce counter |
 | `tests/harness.hpp` | the test harness, small enough to not be a dependency |
 
-`src/fetch_script.cpp` embeds `scripts/fetch_latest_release.sh` so an installed
-library needs no repo checkout. `embed_test` fails if the two drift apart.
+The library embeds `scripts/fetch_latest_release.sh`, generated into the build
+directory at configure time, so an installed library needs no repo checkout.
 
 ## Development
 

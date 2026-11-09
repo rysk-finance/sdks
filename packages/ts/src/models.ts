@@ -99,8 +99,6 @@ export type JSONRPCResponse = {
   error?: ErrorData;
 };
 
-export type JSONResponseHandler = (res: JSONRPCResponse) => void;
-
 // A field the server may not send at all is only checked when it is there.
 function isOptional(value: any, type: "string" | "number" | "boolean" | "object") {
   return value === undefined || value === null || typeof value === type;

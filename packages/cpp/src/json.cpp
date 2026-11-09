@@ -34,6 +34,32 @@ void append_utf8(std::string& out, std::uint32_t code) {
   }
 }
 
+/// Escapes a string as a json string literal, quotes included.
+std::string json_quote(std::string_view raw) {
+  std::string out = "\"";
+  for (char c : raw) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\b': out += "\\b"; break;
+      case '\f': out += "\\f"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[7];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+          out += buf;
+        } else {
+          out.push_back(c);
+        }
+    }
+  }
+  out += "\"";
+  return out;
+}
+
 class Parser {
  public:
   Parser(std::string_view text) : text_(text) {}
@@ -332,12 +358,6 @@ std::optional<std::int64_t> Json::as_int() const {
   return int_;
 }
 
-std::optional<double> Json::as_double() const {
-  if (type_ == Type::Double) return double_;
-  if (type_ == Type::Int) return static_cast<double>(int_);
-  return std::nullopt;
-}
-
 std::optional<std::string> Json::as_string() const {
   if (type_ != Type::String) return std::nullopt;
   return string_;
@@ -380,31 +400,6 @@ bool Json::operator==(const Json& other) const {
 
 std::optional<Json> Json::parse(std::string_view text, std::string* error) {
   return Parser(text).run(error);
-}
-
-std::string json_quote(std::string_view raw) {
-  std::string out = "\"";
-  for (char c : raw) {
-    switch (c) {
-      case '"': out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\b': out += "\\b"; break;
-      case '\f': out += "\\f"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[7];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-          out += buf;
-        } else {
-          out.push_back(c);
-        }
-    }
-  }
-  out += "\"";
-  return out;
 }
 
 std::string Json::dump() const {

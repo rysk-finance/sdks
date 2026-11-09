@@ -1,5 +1,5 @@
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from enum import Enum
 import os
 from os import path
@@ -30,15 +30,10 @@ class Env(Enum):
     MAINNET = 2
 
 
-@dataclass(frozen=True)
-class EnvConfig:
-    base_url: str
-
-
-ENV_CONFIGS = {
-    Env.LOCAL: EnvConfig("ws://localhost:8000/"),
-    Env.TESTNET: EnvConfig("wss://rip-testnet.rysk.finance/"),
-    Env.MAINNET: EnvConfig("wss://v12.rysk.finance/")
+ENV_URLS = {
+    Env.LOCAL: "ws://localhost:8000/",
+    Env.TESTNET: "wss://rip-testnet.rysk.finance/",
+    Env.MAINNET: "wss://v12.rysk.finance/",
 }
 
 
@@ -64,7 +59,7 @@ class Rysk:
         self._sdk_version_check()
 
     def _url(self, uri: str):
-        return f"{ENV_CONFIGS.get(self._env).base_url}{uri}"
+        return f"{ENV_URLS[self._env]}{uri}"
     
     def setup(self) -> str:
         """Downloads the CLI release into the working directory as ./ryskV12 and
@@ -82,15 +77,7 @@ class Rysk:
             raise RuntimeError(
                 f"failed to download the cli: {(result.stderr or result.stdout).strip()}"
             )
-
-        downloaded = "ryskV12"
-        if not path.exists(downloaded):
-            # the script exits non zero on a failure, but check the file all the same
-            raise RuntimeError(
-                f"the download script left no {downloaded}: {(result.stdout or result.stderr).strip()}"
-            )
-        os.chmod(downloaded, 0o755)
-        return downloaded
+        return "ryskV12"  # the script chmods it
 
     def _sdk_version_check(self):
         try:
@@ -265,7 +252,7 @@ class Rysk:
         (default: now). A plain http call, so run it with execute, not send.
         url defaults to this env's api."""
         if url is None:
-            url = "http" + ENV_CONFIGS.get(self._env).base_url[2:].rstrip("/")
+            url = "http" + ENV_URLS[self._env][2:].rstrip("/")
         args = ["self-redeem", "--url", url, "--chain_id", str(chain_id), "--nonce", nonce]
         if expiry is not None:
             args += ["--expiry", str(expiry)]
@@ -273,34 +260,27 @@ class Rysk:
             args += ["--exclude_assets", ",".join(exclude_assets)]
         return args
 
-    def _premium_url_args(self, url: Optional[str]) -> List[str]:
-        """Base url of the premium rfq api. Left out of the args when not given,
-        so the CLI's own default (production) applies; pass it for a local or
-        staging api."""
-        return ["--url", url] if url else []
+    def _premium(self, cmd: str, url: Optional[str], *flags: str) -> List[str]:
+        """url is the premium rfq api's base. Left out, the CLI's own default
+        (production) applies; pass it for a local or staging api."""
+        return ["premium", cmd, *flags, *(["--url", url] if url else [])]
 
     def premium_requests_args(self, maker: str, url: Optional[str] = None):
         """Requests this maker may quote, each carrying the domain to sign against."""
-        return ["premium", "requests", "--maker", maker, *self._premium_url_args(url)]
+        return self._premium("requests", url, "--maker", maker)
 
     def premium_quotes_args(self, maker: str, url: Optional[str] = None):
         """This maker's live quotes - the only place quote ids come from."""
-        return ["premium", "quotes", "--maker", maker, *self._premium_url_args(url)]
+        return self._premium("quotes", url, "--maker", maker)
 
     def premium_quote_status_args(self, id: str, url: Optional[str] = None):
         """One quote by id, whatever its status."""
-        return ["premium", "quote-status", "--id", id, *self._premium_url_args(url)]
+        return self._premium("quote-status", url, "--id", id)
 
     def premium_quote_batch_args(self, source: str, url: Optional[str] = None):
         """Posts a batch of quotes in one call, reading them from source - a file
         path, or "-" for stdin. Build the file with premium_quote_batch."""
-        return [
-            "premium",
-            "quote",
-            "--batch",
-            source,
-            *self._premium_url_args(url),
-        ]
+        return self._premium("quote", url, "--batch", source)
 
     def premium_quote_batch(self, quotes: List[Tuple[str, Quote]]) -> str:
         """Serialises (request id, quote) pairs into the json array
@@ -319,75 +299,37 @@ class Rysk:
     ):
         """Pulls one of this maker's quotes. The nonce is spent once and shares its
         keyspace with quote nonces, so draw it from the same counter."""
-        return [
-            "premium",
-            "cancel",
-            "--id",
-            id,
-            "--chain_id",
-            str(chain_id),
-            "--nonce",
-            nonce,
-            *self._premium_url_args(url),
-        ]
+        return self._premium("cancel", url, "--id", id, "--chain_id", str(chain_id), "--nonce", nonce)
 
     def premium_pools_args(self, url: Optional[str] = None):
         """Taker: the pools requests can be opened on."""
-        return ["premium", "pools", *self._premium_url_args(url)]
+        return self._premium("pools", url)
 
     def premium_request_args(
         self, source: str, chain_id: int, nonce: str, url: Optional[str] = None
     ):
         """Taker: opens the requests in source - a json array file path, or "-" for
         stdin. This key has to be an rfq signer on each request's pool."""
-        return [
-            "premium",
-            "request",
-            "--batch",
-            source,
-            "--chain_id",
-            str(chain_id),
-            "--nonce",
-            nonce,
-            *self._premium_url_args(url),
-        ]
+        return self._premium("request", url, "--batch", source, "--chain_id", str(chain_id), "--nonce", nonce)
 
     def premium_taker_requests_args(self, taker: str, url: Optional[str] = None):
         """Taker: a pool's live requests."""
-        return ["premium", "taker-requests", "--taker", taker, *self._premium_url_args(url)]
+        return self._premium("taker-requests", url, "--taker", taker)
 
     def premium_request_quotes_args(self, id: str, url: Optional[str] = None):
         """Taker: the live quotes on one request."""
-        return ["premium", "request-quotes", "--id", id, *self._premium_url_args(url)]
+        return self._premium("request-quotes", url, "--id", id)
 
     def premium_cancel_request_args(
         self, id: str, chain_id: int, nonce: str, url: Optional[str] = None
     ):
         """Taker: cancels a request and every quote on it."""
-        return [
-            "premium",
-            "cancel-request",
-            "--id",
-            id,
-            "--chain_id",
-            str(chain_id),
-            "--nonce",
-            nonce,
-            *self._premium_url_args(url),
-        ]
+        return self._premium("cancel-request", url, "--id", id, "--chain_id", str(chain_id), "--nonce", nonce)
 
     def premium_execute_args(self, quote_id: str, nonce: str, url: Optional[str] = None):
         """Taker: takes a quote by id. The CLI signs the confirmation, the api
         settles it on chain, and the transaction hash is printed."""
-        return [
-            "premium",
-            "execute",
-            "--quote_id",
-            quote_id,
-            "--nonce",
-            nonce,
-            *self._premium_url_args(url),
-        ]
+        return self._premium("execute", url, "--quote_id", quote_id, "--nonce", nonce)
 
     def quote_args(self, rfq_id: str, quote: Quote):
         base = [

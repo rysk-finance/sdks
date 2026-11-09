@@ -44,9 +44,7 @@ var selfRedeemAction = &Command{
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *Context) error {
-		return selfRedeem(c)
-	},
+	Action: selfRedeem,
 }
 
 // selfRedeem posts to cc's /api/redeem/self. The redeemer is whoever signed the
@@ -54,8 +52,8 @@ var selfRedeemAction = &Command{
 // server only ever redeems for the caller.
 func selfRedeem(c *Context) error {
 	nonce := c.String("nonce")
-	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
-		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
+	if err := checkNonce(nonce); err != nil {
+		return err
 	}
 	headers, err := premiumAuthHeaders(c.Int64("chain_id"), nonce, c.String("private_key"))
 	if err != nil {

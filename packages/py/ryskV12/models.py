@@ -1,6 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 import json
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
+
+
+def _load(cls, data: Union[str, bytes, Dict[str, Any]]):
+    """Builds a dataclass from a json string/bytes or an already parsed dict,
+    taking each field by name; a field the server left out is None."""
+    j = data if isinstance(data, dict) else json.loads(data)
+    return cls(**{f.name: j.get(f.name) for f in fields(cls)})
 
 
 @dataclass(frozen=True)
@@ -14,18 +21,6 @@ class TypedDataDomain:
     chainId: Optional[Union[str, int]] = None
     verifyingContract: Optional[str] = None
     salt: Optional[str] = None
-
-    @staticmethod
-    def from_dict(j: Optional[Dict[str, Any]]) -> Optional["TypedDataDomain"]:
-        if not j:
-            return None
-        return TypedDataDomain(
-            name=j.get("name"),
-            version=j.get("version"),
-            chainId=j.get("chainId"),
-            verifyingContract=j.get("verifyingContract"),
-            salt=j.get("salt"),
-        )
 
 
 @dataclass(frozen=True)
@@ -55,30 +50,10 @@ class Request:
     typeDataDomain: Optional[TypedDataDomain] = None
 
     @staticmethod
-    def from_json(data: str) -> "Request":
-        j = json.loads(data)
-        return Request(
-            asset=j.get("asset"),
-            assetName=j.get("assetName"),
-            chainId=j.get("chainId"),
-            expiry=j.get("expiry"),
-            isPut=j.get("isPut"),
-            quantity=j.get("quantity"),
-            strike=j.get("strike"),
-            taker=j.get("taker"),
-            usd=j.get("usd"),
-            collateralAsset=j.get("collateralAsset"),
-            id=j.get("id"),
-            createdAt=j.get("createdAt"),
-            validUntil=j.get("validUntil"),
-            makers=j.get("makers"),
-            isTakerBuy=j.get("isTakerBuy"),
-            auctionDeadline=j.get("auctionDeadline"),
-            isPremium=j.get("isPremium"),
-            premiumAsset=j.get("premiumAsset"),
-            isEIP1271=j.get("isEIP1271"),
-            typeDataDomain=TypedDataDomain.from_dict(j.get("typeDataDomain")),
-        )
+    def from_json(data: Union[str, bytes, Dict[str, Any]]) -> "Request":
+        r = _load(Request, data)
+        domain = r.typeDataDomain
+        return replace(r, typeDataDomain=_load(TypedDataDomain, domain) if domain else None)
 
 
 @dataclass(frozen=True)
@@ -102,25 +77,6 @@ class Quote:
     domain: Optional[TypedDataDomain] = None
 
 
-@dataclass(frozen=True)
-class QuoteNotification:
-    rfqId: str
-    assetAddress: str
-    chainId: int
-    newBest: str
-    yours: str
-
-    @staticmethod
-    def from_json(data: str) -> "QuoteNotification":
-        j = json.loads(data)
-        return QuoteNotification(
-            rfqId=j.get("rfqId"),
-            assetAddress=j.get("assetAddress"),
-            chainId=j.get("chainId"),
-            newBest=j.get("newBest"),
-            yours=j.get("yours"),
-        )
-
 
 @dataclass(frozen=True)
 class Transfer:
@@ -141,16 +97,6 @@ class ErrorData:
     message: str
     data: Optional[Any] = None
 
-    @staticmethod
-    def from_dict(j: Optional[Dict[str, Any]]) -> Optional["ErrorData"]:
-        if not j:
-            return None
-        return ErrorData(
-            code=j.get("code"),
-            message=j.get("message"),
-            data=j.get("data"),
-        )
-
 
 @dataclass(frozen=True)
 class JSONRPCResponse:
@@ -162,17 +108,10 @@ class JSONRPCResponse:
     error: Optional[ErrorData] = None
 
     @staticmethod
-    def from_json(data: str) -> "JSONRPCResponse":
-        j = json.loads(data)
-        return JSONRPCResponse(
-            jsonrpc=j.get("jsonrpc"),
-            id=j.get("id"),
-            result=j.get("result"),
-            error=ErrorData.from_dict(j.get("error")),
-        )
+    def from_json(data: Union[str, bytes, Dict[str, Any]]) -> "JSONRPCResponse":
+        r = _load(JSONRPCResponse, data)
+        return replace(r, error=_load(ErrorData, r.error) if r.error else None)
 
-
-JSONResponseHandler = Callable[[JSONRPCResponse], None]
 
 
 def _is_optional(value: Any, expected: type) -> bool:

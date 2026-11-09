@@ -45,9 +45,7 @@ var transferAction = &Command{
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *Context) error {
-		return transfer(c)
-	},
+	Action: transfer,
 }
 
 func transfer(c *Context) error {

@@ -36,11 +36,9 @@ class Json {
   Json(Array v) : type_(Type::Array), array_(std::move(v)) {}
   Json(Object v) : type_(Type::Object), object_(std::move(v)) {}
 
-  Type type() const { return type_; }
   bool is_null() const { return type_ == Type::Null; }
   bool is_bool() const { return type_ == Type::Bool; }
   bool is_int() const { return type_ == Type::Int; }
-  bool is_number() const { return type_ == Type::Int || type_ == Type::Double; }
   bool is_string() const { return type_ == Type::String; }
   bool is_array() const { return type_ == Type::Array; }
   bool is_object() const { return type_ == Type::Object; }
@@ -49,7 +47,6 @@ class Json {
   // wrong type is what the other sdks' predicates exist to catch.
   std::optional<bool> as_bool() const;
   std::optional<std::int64_t> as_int() const;
-  std::optional<double> as_double() const;
   std::optional<std::string> as_string() const;
   const Array* as_array() const { return type_ == Type::Array ? &array_ : nullptr; }
   const Object* as_object() const { return type_ == Type::Object ? &object_ : nullptr; }
@@ -68,7 +65,6 @@ class Json {
   std::string dump() const;
 
   bool operator==(const Json& other) const;
-  bool operator!=(const Json& other) const { return !(*this == other); }
 
  private:
   Type type_ = Type::Null;
@@ -79,8 +75,5 @@ class Json {
   Array array_;
   Object object_;
 };
-
-/// Escapes a string as a json string literal, quotes included.
-std::string json_quote(std::string_view raw);
 
 }  // namespace ryskv12

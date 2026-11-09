@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -14,9 +15,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/goccy/go-json"
 )
 
 // TestPremiumE2E trades an rfq through the premium api, end to end:
@@ -360,24 +359,15 @@ func e2eApprove(t *testing.T, rpcURL string, makerKey string, chainID int, asset
 	if err != nil {
 		t.Fatalf("maker key: %v", err)
 	}
-	token := erc20(common.HexToAddress(asset), client)
-	allowance, err := erc20Allowance(&bind.CallOpts{Context: ctx}, token, account.Public, common.HexToAddress(spender))
+	allowance, err := erc20Allowance(&bind.CallOpts{Context: ctx}, erc20(common.HexToAddress(asset), client), account.Public, common.HexToAddress(spender))
 	if err != nil {
 		t.Fatalf("allowance: %v", err)
 	}
 	if allowance.Cmp(need) >= 0 {
 		return
 	}
-	opts, err := account.newTransactionOpts(ctx, chainID, *client)
-	if err != nil {
-		t.Fatalf("transaction opts: %v", err)
-	}
-	tx, err := token.Transact(opts, "approve", common.HexToAddress(spender), amount)
-	if err != nil {
+	if _, err := account.approve(ctx, chainID, *client, amount, common.HexToAddress(asset), common.HexToAddress(spender)); err != nil {
 		t.Fatalf("approve %s to %s: %v", asset, spender, err)
-	}
-	if rx, err := bind.WaitMined(ctx, client, tx); err != nil || rx.Status != 1 {
-		t.Fatalf("approve %s did not succeed: %v", tx.Hash().Hex(), err)
 	}
 }
 
@@ -392,19 +382,12 @@ func waitMined(t *testing.T, rpcURL string, txHash string) {
 		t.Fatalf("dial %s: %v", rpcURL, err)
 	}
 	defer client.Close()
-	for {
-		rx, err := client.TransactionReceipt(ctx, common.HexToHash(txHash))
-		if err == nil {
-			if rx.Status != 1 {
-				t.Fatalf("trade %s reverted", txHash)
-			}
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("trade %s not mined after 2 minutes: %v", txHash, err)
-		case <-time.After(2 * time.Second):
-		}
+	rx, err := bind.WaitMinedHash(ctx, client, common.HexToHash(txHash))
+	if err != nil {
+		t.Fatalf("trade %s not mined after 2 minutes: %v", txHash, err)
+	}
+	if rx.Status != 1 {
+		t.Fatalf("trade %s reverted", txHash)
 	}
 }
 
@@ -434,11 +417,11 @@ func e2ePremium(t *testing.T, apiURL string, args ...string) string {
 // e2eAddress is the lowercased address a hex private key signs as.
 func e2eAddress(t *testing.T, privateKey string) string {
 	t.Helper()
-	key, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
+	account, err := newAccountFromPrivateKey(privateKey)
 	if err != nil {
 		t.Fatalf("invalid private key: %v", err)
 	}
-	return strings.ToLower(crypto.PubkeyToAddress(key.PublicKey).Hex())
+	return strings.ToLower(account.Public.Hex())
 }
 
 func envOr(name string, fallback string) string {

@@ -91,10 +91,7 @@ struct QuoteNotification {
   static std::optional<QuoteNotification> from_json(const Json& value);
 };
 
-/// A deposit or withdrawal.
-///
-/// The field names here are the sdk's; `to_json` writes the camelCase the cli
-/// puts on the socket, and the arg builder spells the cli's snake_case flags.
+/// A deposit or withdrawal. The arg builder spells the cli's snake_case flags.
 struct Transfer {
   std::string user;
   std::string amount;
@@ -102,9 +99,6 @@ struct Transfer {
   std::int64_t chain_id = 0;
   bool is_deposit = false;
   std::string nonce;
-
-  Json to_json() const;
-  static std::optional<Transfer> from_json(const Json& value);
 };
 
 /// What the cli reports instead of a result.

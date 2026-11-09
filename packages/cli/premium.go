@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 const (
@@ -78,7 +78,7 @@ var premiumRequestsAction = &Command{
 	},
 	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("maker"))}}
-		return premiumProxy(c, http.MethodGet, "/api/requests/maker", query)
+		return premiumProxy(c, http.MethodGet, "/api/requests/maker", query, nil, nil)
 	},
 }
 
@@ -95,7 +95,7 @@ var premiumQuotesAction = &Command{
 	},
 	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("maker"))}}
-		return premiumProxy(c, http.MethodGet, "/api/quotes", query)
+		return premiumProxy(c, http.MethodGet, "/api/quotes", query, nil, nil)
 	},
 }
 
@@ -111,7 +111,7 @@ var premiumQuoteStatusAction = &Command{
 		},
 	},
 	Action: func(c *Context) error {
-		return premiumProxy(c, http.MethodGet, "/api/quotes/"+url.PathEscape(c.String("id")), nil)
+		return premiumProxy(c, http.MethodGet, "/api/quotes/"+url.PathEscape(c.String("id")), nil, nil, nil)
 	},
 }
 
@@ -164,9 +164,7 @@ var premiumQuoteAction = &Command{
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *Context) error {
-		return premiumQuote(c)
-	},
+	Action: premiumQuote,
 }
 
 // premiumDomainInput is the EIP712 domain as a request carries it. Only the
@@ -272,20 +270,40 @@ func premiumStatusError(baseURL string, status int, body []byte) error {
 	}
 }
 
-// premiumProxy runs a read and prints the api's response as it came, so callers
-// keep working when the api grows a field.
-func premiumProxy(c *Context, method string, path string, query url.Values) error {
+// premiumProxy sends a request and prints the api's response as it came, if it
+// has one, so callers keep working when the api grows a field.
+func premiumProxy(c *Context, method string, path string, query url.Values, body []byte, headers map[string]string) error {
 	client := newPremiumClient(c.String("url"))
-	status, body, err := client.do(method, path, query, nil, nil)
+	status, res, err := client.do(method, path, query, body, headers)
 	if err != nil {
 		return err
 	}
-	if err := premiumStatusError(client.baseURL, status, body); err != nil {
+	if err := premiumStatusError(client.baseURL, status, res); err != nil {
 		return err
 	}
-
-	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
+	if trimmed := strings.TrimSpace(string(res)); trimmed != "" {
 		fmt.Println(trimmed)
+	}
+	return nil
+}
+
+// premiumAuthed is premiumProxy for a write signed with auth headers.
+func premiumAuthed(c *Context, method string, path string, body []byte) error {
+	nonce := c.String("nonce")
+	if err := checkNonce(nonce); err != nil {
+		return err
+	}
+	headers, err := premiumAuthHeaders(c.Int64("chain_id"), nonce, c.String("private_key"))
+	if err != nil {
+		return err
+	}
+	return premiumProxy(c, method, path, nil, body, headers)
+}
+
+// checkNonce refuses a nonce the api would: they are signed as decimal strings.
+func checkNonce(nonce string) error {
+	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
+		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
 	}
 	return nil
 }
@@ -331,9 +349,16 @@ func premiumAuthTypedData(chainId int64, nonce string) *apitypes.TypedData {
 
 func premiumQuote(c *Context) error {
 	privateKey := c.String("private_key")
-	inputs, err := premiumQuoteInputs(c)
+	data, err := premiumReadBatch(c.String("batch"))
 	if err != nil {
 		return err
+	}
+	var inputs []premiumQuoteInput
+	if err := json.Unmarshal(data, &inputs); err != nil {
+		return fmt.Errorf("invalid batch json: %w", err)
+	}
+	if len(inputs) == 0 {
+		return errors.New("batch is empty")
 	}
 
 	// Everything is signed before anything is posted, so a bad entry in a batch
@@ -365,23 +390,6 @@ func premiumQuote(c *Context) error {
 		return err
 	}
 	return premiumQuoteResult(res, len(payloads))
-}
-
-// premiumQuoteInputs reads the quotes to sign from the batch.
-func premiumQuoteInputs(c *Context) ([]premiumQuoteInput, error) {
-	data, err := premiumReadBatch(c.String("batch"))
-	if err != nil {
-		return nil, err
-	}
-
-	var inputs []premiumQuoteInput
-	if err := json.Unmarshal(data, &inputs); err != nil {
-		return nil, fmt.Errorf("invalid batch json: %w", err)
-	}
-	if len(inputs) == 0 {
-		return nil, errors.New("batch is empty")
-	}
-	return inputs, nil
 }
 
 func premiumReadBatch(source string) ([]byte, error) {
@@ -423,8 +431,8 @@ func premiumPrepareQuote(input premiumQuoteInput, privateKey string, now time.Ti
 	if input.ChainID == 0 {
 		return payload, errors.New("missing chain id")
 	}
-	if _, err := strconv.ParseUint(input.Nonce, 10, 64); err != nil {
-		return payload, fmt.Errorf("invalid nonce %q: has to be a decimal uint64", input.Nonce)
+	if err := checkNonce(input.Nonce); err != nil {
+		return payload, err
 	}
 	if err := premiumValidatePrice(input.Price); err != nil {
 		return payload, err

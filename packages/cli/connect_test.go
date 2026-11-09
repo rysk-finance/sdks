@@ -1,10 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/goccy/go-json"
 )
 
 // The same commands run once per stdin line in one process, so a flag set by

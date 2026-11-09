@@ -1,15 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/ethereum/go-ethereum/signer/core/apitypes"
-	"github.com/goccy/go-json"
 )
 
 // Taker commands. A request's taker is always a pool; the key that signs for it
@@ -20,7 +18,7 @@ var premiumPoolsAction = &Command{
 	Usage: "list the pools requests can be opened on",
 	Flags: []Flag{premiumURLFlag()},
 	Action: func(c *Context) error {
-		return premiumProxy(c, http.MethodGet, "/api/pools", nil)
+		return premiumProxy(c, http.MethodGet, "/api/pools", nil, nil, nil)
 	},
 }
 
@@ -37,7 +35,7 @@ var premiumTakerRequestsAction = &Command{
 	},
 	Action: func(c *Context) error {
 		query := url.Values{"address": {strings.ToLower(c.String("taker"))}}
-		return premiumProxy(c, http.MethodGet, "/api/requests/taker", query)
+		return premiumProxy(c, http.MethodGet, "/api/requests/taker", query, nil, nil)
 	},
 }
 
@@ -53,7 +51,7 @@ var premiumRequestQuotesAction = &Command{
 		},
 	},
 	Action: func(c *Context) error {
-		return premiumProxy(c, http.MethodGet, "/api/requests/"+url.PathEscape(c.String("id"))+"/quotes", nil)
+		return premiumProxy(c, http.MethodGet, "/api/requests/"+url.PathEscape(c.String("id"))+"/quotes", nil, nil, nil)
 	},
 }
 
@@ -142,35 +140,7 @@ var premiumExecuteAction = &Command{
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
 	},
-	Action: func(c *Context) error {
-		return premiumExecute(c)
-	},
-}
-
-// premiumAuthed sends a write signed with auth headers and prints the api's
-// response, if it has one.
-func premiumAuthed(c *Context, method string, path string, body []byte) error {
-	nonce := c.String("nonce")
-	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
-		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
-	}
-	headers, err := premiumAuthHeaders(c.Int64("chain_id"), nonce, c.String("private_key"))
-	if err != nil {
-		return err
-	}
-
-	client := newPremiumClient(c.String("url"))
-	status, res, err := client.do(method, path, nil, body, headers)
-	if err != nil {
-		return err
-	}
-	if err := premiumStatusError(client.baseURL, status, res); err != nil {
-		return err
-	}
-	if trimmed := strings.TrimSpace(string(res)); trimmed != "" {
-		fmt.Println(trimmed)
-	}
-	return nil
+	Action: premiumExecute,
 }
 
 type premiumStoredQuote struct {
@@ -202,8 +172,8 @@ type premiumStoredRequest struct {
 // that transaction is mined.
 func premiumExecute(c *Context) error {
 	nonce := c.String("nonce")
-	if _, err := strconv.ParseUint(nonce, 10, 64); err != nil {
-		return fmt.Errorf("invalid nonce %q: has to be a decimal uint64", nonce)
+	if err := checkNonce(nonce); err != nil {
+		return err
 	}
 	privateKey := c.String("private_key")
 	signer, err := newAccountFromPrivateKey(privateKey)
@@ -261,19 +231,11 @@ func premiumExecute(c *Context) error {
 	message["chainId"] = strconv.Itoa(request.ChainID)
 	message["expiry"] = strconv.FormatInt(request.Expiry, 10)
 
-	hash, err := EncodeTypedData(&apitypes.TypedData{
-		Types: apitypes.Types{
-			"EIP712Domain": (*EIP712_TYPES)["EIP712Domain"],
-			"Confirmation": confirmationType,
-		},
-		PrimaryType: "Confirmation",
-		Domain:      *domain,
-		Message:     message,
-	})
+	hash, err := confirmationHash(domain, message)
 	if err != nil {
 		return err
 	}
-	signature, err := Sign(hash.Bytes(), privateKey)
+	signature, err := Sign(hash, privateKey)
 	if err != nil {
 		return err
 	}

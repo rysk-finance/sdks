@@ -89,36 +89,25 @@ pub struct Rysk {
 }
 
 /// Configures a [`Rysk`] before the cli version is checked.
-pub struct RyskBuilder {
-    env: Env,
-    cli_path: String,
-    private_key: String,
-    strict_version: bool,
-}
+pub struct RyskBuilder(Rysk);
 
 impl RyskBuilder {
     /// Where the cli binary lives. Defaults to `./ryskV12`.
     pub fn cli_path(mut self, path: impl Into<String>) -> Self {
-        self.cli_path = path.into();
+        self.0.cli_path = path.into();
         self
     }
 
     /// Fail instead of warning when the cli is older than this sdk needs.
     pub fn strict_version(mut self, strict: bool) -> Self {
-        self.strict_version = strict;
+        self.0.strict_version = strict;
         self
     }
 
     /// Checks the cli version, then hands back the client.
     pub fn build(self) -> Result<Rysk, Error> {
-        let rysk = Rysk {
-            env: self.env,
-            cli_path: self.cli_path,
-            private_key: self.private_key,
-            strict_version: self.strict_version,
-        };
-        rysk.version_check()?;
-        Ok(rysk)
+        self.0.version_check()?;
+        Ok(self.0)
     }
 }
 
@@ -129,16 +118,12 @@ impl Rysk {
     }
 
     pub fn builder(env: Env, private_key: impl Into<String>) -> RyskBuilder {
-        RyskBuilder {
+        RyskBuilder(Rysk {
             env,
             cli_path: DEFAULT_CLI_PATH.to_string(),
             private_key: private_key.into(),
             strict_version: false,
-        }
-    }
-
-    pub fn cli_path(&self) -> &str {
-        &self.cli_path
+        })
     }
 
     fn url(&self, uri: &str) -> String {
@@ -193,7 +178,7 @@ impl Rysk {
     pub fn setup(&self) -> Result<String, Error> {
         // The script ships inside the crate, so it is written out and run rather
         // than shelled out to from a path that only exists in a repo checkout.
-        let mut child = Command::new("sh")
+        let mut child = Command::new("bash") // the script uses [[ ]], which dash (debian /bin/sh) lacks
             .arg("-s")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -397,47 +382,39 @@ impl Rysk {
         args
     }
 
-    /// Base url of the premium rfq api. Left out of the args when not given, so
-    /// the cli's own default (production) applies; pass it for a local or
-    /// staging api.
-    fn premium_url_args(&self, url: Option<&str>) -> Vec<String> {
-        match url.filter(|u| !u.is_empty()) {
-            Some(url) => vec!["--url".to_string(), url.to_string()],
-            None => Vec::new(),
+    /// `premium <sub>` with its flags, then `--url` last. The url is left out
+    /// when not given, so the cli's own default (production) applies; pass it
+    /// for a local or staging api.
+    fn premium(&self, sub: &str, flags: &[(&str, &str)], url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), sub.to_string()];
+        for (flag, value) in flags {
+            pair(&mut args, flag, value);
         }
+        if let Some(url) = url.filter(|u| !u.is_empty()) {
+            pair(&mut args, "--url", url);
+        }
+        args
     }
 
     /// Requests this maker may quote, each carrying the domain to sign against.
     pub fn premium_requests_args(&self, maker: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "requests".to_string()];
-        pair(&mut args, "--maker", maker);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("requests", &[("--maker", maker)], url)
     }
 
     /// This maker's live quotes: the only place quote ids come from.
     pub fn premium_quotes_args(&self, maker: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "quotes".to_string()];
-        pair(&mut args, "--maker", maker);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("quotes", &[("--maker", maker)], url)
     }
 
     /// One quote by id, whatever its status.
     pub fn premium_quote_status_args(&self, id: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "quote-status".to_string()];
-        pair(&mut args, "--id", id);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("quote-status", &[("--id", id)], url)
     }
 
     /// Posts a batch of quotes in one call, reading them from `source`: a file
     /// path, or `-` for stdin. Build the file with [`Rysk::premium_quote_batch`].
     pub fn premium_quote_batch_args(&self, source: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "quote".to_string()];
-        pair(&mut args, "--batch", source);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("quote", &[("--batch", source)], url)
     }
 
     /// Serialises (request id, quote) pairs into the json array
@@ -472,19 +449,20 @@ impl Rysk {
         nonce: &str,
         url: Option<&str>,
     ) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "cancel".to_string()];
-        pair(&mut args, "--id", id);
-        pair(&mut args, "--chain_id", chain_id.to_string());
-        pair(&mut args, "--nonce", nonce);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium(
+            "cancel",
+            &[
+                ("--id", id),
+                ("--chain_id", &chain_id.to_string()),
+                ("--nonce", nonce),
+            ],
+            url,
+        )
     }
 
     /// Taker: the pools requests can be opened on.
     pub fn premium_pools_args(&self, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "pools".to_string()];
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("pools", &[], url)
     }
 
     /// Taker: opens the requests in `source` (a json array, file path or `-` for
@@ -496,28 +474,25 @@ impl Rysk {
         nonce: &str,
         url: Option<&str>,
     ) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "request".to_string()];
-        pair(&mut args, "--batch", source);
-        pair(&mut args, "--chain_id", chain_id.to_string());
-        pair(&mut args, "--nonce", nonce);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium(
+            "request",
+            &[
+                ("--batch", source),
+                ("--chain_id", &chain_id.to_string()),
+                ("--nonce", nonce),
+            ],
+            url,
+        )
     }
 
     /// Taker: a pool's live requests.
     pub fn premium_taker_requests_args(&self, taker: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "taker-requests".to_string()];
-        pair(&mut args, "--taker", taker);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("taker-requests", &[("--taker", taker)], url)
     }
 
     /// Taker: the live quotes on one request.
     pub fn premium_request_quotes_args(&self, id: &str, url: Option<&str>) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "request-quotes".to_string()];
-        pair(&mut args, "--id", id);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium("request-quotes", &[("--id", id)], url)
     }
 
     /// Taker: cancels a request and every quote on it.
@@ -528,12 +503,15 @@ impl Rysk {
         nonce: &str,
         url: Option<&str>,
     ) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "cancel-request".to_string()];
-        pair(&mut args, "--id", id);
-        pair(&mut args, "--chain_id", chain_id.to_string());
-        pair(&mut args, "--nonce", nonce);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium(
+            "cancel-request",
+            &[
+                ("--id", id),
+                ("--chain_id", &chain_id.to_string()),
+                ("--nonce", nonce),
+            ],
+            url,
+        )
     }
 
     /// Taker: takes a quote by id; the cli signs the confirmation and prints
@@ -544,11 +522,11 @@ impl Rysk {
         nonce: &str,
         url: Option<&str>,
     ) -> Vec<String> {
-        let mut args = vec!["premium".to_string(), "execute".to_string()];
-        pair(&mut args, "--quote_id", quote_id);
-        pair(&mut args, "--nonce", nonce);
-        args.extend(self.premium_url_args(url));
-        args
+        self.premium(
+            "execute",
+            &[("--quote_id", quote_id), ("--nonce", nonce)],
+            url,
+        )
     }
 }
 
