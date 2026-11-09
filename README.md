@@ -60,6 +60,10 @@ publishes on a merge.
    republish a version that is already tagged, checks that a CLI release exists
    satisfying that SDK's minimum, then tags, releases and publishes.
 
+To do 2 and 3 in one go, tick *release_sdks* when running *Release CLI*. Once
+the CLI release exists, it starts the release workflow of every SDK whose
+manifest version is not tagged yet, and skips the rest.
+
 ## Publishing credentials
 
 npm, PyPI and crates.io publish over OIDC trusted publishing — there is no long lived token
