@@ -2,6 +2,8 @@
 
 Python wrapper for ryskV12 cli
 
+Integration guides: [V12 websocket auction](docs/v12.md) · [Premium RFQ](docs/premium.md).
+
 ## Setup
 
 1.  **Ensure Python 3.11+ is installed.**
@@ -110,6 +112,7 @@ rysk_sdk.send(maker, rysk_sdk.balances_args(account))
 from ryskV12.models import Transfer
 
 transfer_details = Transfer(
+    user="0xabc",  # the maker
     amount="500000",
     asset="0x...",  # The asset address
     chain_id=84532,
@@ -144,7 +147,7 @@ rysk_sdk.execute(rysk_sdk.self_redeem_args(84532, "46", expiry=1767225600, exclu
 ```python
 from ryskV12.models import Quote
 
-request_id = "some-uuid-from-server"
+request_id = "some-uuid-from-server"  # the rfq id; request is the rfq itself
 quote_details = Quote(
     assetAddress="0x...",
     chainId=84532,
@@ -153,9 +156,9 @@ quote_details = Quote(
     isTakerBuy=True,
     maker="0x...",
     nonce="another-unique-nonce",
-    price="0.01",
-    quantity="1",
-    strike="1000000",
+    price="1250000000000000000",  # USD per option, 1e18
+    quantity="1000000000000000000",  # 1e18
+    strike="350000000000",  # 1e8
     validUntil=1678886460,
     usd="0x...",
     collateralAsset="0x...",
