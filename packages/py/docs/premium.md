@@ -117,11 +117,15 @@ _, mine = batch[0]
 quote_id = next(str(q["id"]) for q in book if str(q["nonce"]) == mine.nonce)
 
 run(maker, maker.premium_quote_status_args(quote_id, URL))
+run(maker, maker.premium_trades_args(MAKER, CHAIN_ID, url=URL))  # settled fills
 run(maker, maker.premium_cancel_args(quote_id, CHAIN_ID, nonces.next(), URL))
 ```
 
 A quote lives until taken, cancelled or past `validUntil`; requote inside the
 10 minute window to keep a price standing.
+
+To learn which quotes were filled, poll the settled trades, newest first. A
+row carries the option, quantity and `txHash`, but not the quote id.
 
 ## 4. Taker: take a quote
 

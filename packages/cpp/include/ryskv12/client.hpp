@@ -129,6 +129,11 @@ class Rysk {
       const std::string& maker, std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_quotes_args(
       const std::string& maker, std::optional<std::string> url = std::nullopt) const;
+  /// An account's settled trades, newest first, indexed from the chain: how a maker learns which of its quotes were filled.
+  std::vector<std::string> premium_trades_args(
+      const std::string& account, std::optional<std::int64_t> chain_id = std::nullopt,
+      std::optional<std::string> pool = std::nullopt,
+      std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_quote_status_args(
       const std::string& id, std::optional<std::string> url = std::nullopt) const;
   std::vector<std::string> premium_quote_batch_args(

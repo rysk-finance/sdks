@@ -332,3 +332,10 @@ test("will_redeem and self-redeem spell the cli's flags", () => {
     "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", `${ASSET},${MAKER}`,
   ]);
 });
+
+test("premium trades filters only when given", () => {
+  assert.deepEqual(sdk().premiumTradesArgs(MAKER), ["premium", "trades", "--account", MAKER]);
+  assert.deepEqual(sdk().premiumTradesArgs(MAKER, 84532, "0x6e37fb1f933f53f389a072277d7f942593a760dd", "http://x"), [
+    "premium", "trades", "--account", MAKER, "--chain_id", "84532", "--pool", "0x6e37fb1f933f53f389a072277d7f942593a760dd", "--url", "http://x",
+  ]);
+});

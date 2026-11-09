@@ -140,11 +140,15 @@ let quote_id = book.iter()
     .ok_or("quote not on the book")?;
 
 run(&maker, &maker.premium_quote_status_args(&quote_id, URL))?;
+run(&maker, &maker.premium_trades_args(MAKER, Some(CHAIN_ID), None, URL))?; // settled fills
 run(&maker, &maker.premium_cancel_args(&quote_id, CHAIN_ID, &nonces.next()?, URL))?;
 ```
 
 A quote lives until taken, cancelled or past `valid_until`; requote inside the
 10 minute window to keep a price standing.
+
+To learn which quotes were filled, poll the settled trades, newest first. A
+row carries the option, quantity and `txHash`, but not the quote id.
 
 ## 4. Taker: take a quote
 

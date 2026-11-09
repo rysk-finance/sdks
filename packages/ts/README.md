@@ -181,6 +181,7 @@ const proc = ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
 // your live quotes (the only source of quote ids), one quote, and a cancel
 ryskSDK.execute(ryskSDK.premiumQuotesArgs(maker));
 ryskSDK.execute(ryskSDK.premiumQuoteStatusArgs(quoteId));
+ryskSDK.execute(ryskSDK.premiumTradesArgs(maker)); // settled fills, newest first
 ryskSDK.execute(ryskSDK.premiumCancelArgs(quoteId, chainId, "43"));
 ```
 

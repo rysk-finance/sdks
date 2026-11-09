@@ -513,6 +513,9 @@ func TestPremiumReadsProxyTheApi(t *testing.T) {
 		{[]string{"requests", "--maker", strings.ToUpper(maker)}, "/api/requests/maker", "address=" + maker},
 		{[]string{"quotes", "--maker", maker}, "/api/quotes", "address=" + maker},
 		{[]string{"quote-status", "--id", "9f31"}, "/api/quotes/9f31", ""},
+		{[]string{"trades", "--account", strings.ToUpper(maker)}, "/api/trades", "account=" + maker},
+		{[]string{"trades", "--account", maker, "--chain_id", "84532", "--pool", strings.ToUpper(maker)}, "/api/trades",
+			"account=" + maker + "&chainId=84532&pool=" + maker},
 	}
 	for _, tc := range cases {
 		out, err := captureStdout(t, func() error {

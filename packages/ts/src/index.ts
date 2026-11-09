@@ -85,7 +85,7 @@ class Rysk {
   private _env: Env;
   private _cli_path: string;
   private _private_key: string;
-  private _minSdkVersion: string = "5.1.0";
+  private _minSdkVersion: string = "5.3.0";
   private _strictVersion: boolean;
 
   /**
@@ -323,6 +323,18 @@ class Rysk {
   /** This maker's live quotes - the only place quote ids come from. */
   public premiumQuotesArgs(maker: string, url?: string) {
     return this._premium("quotes", url, "--maker", maker);
+  }
+
+  /** An account's settled trades, newest first, indexed from the chain: how a maker learns which of its quotes were filled. */
+  public premiumTradesArgs(account: string, chainId?: number, pool?: string, url?: string) {
+    return this._premium(
+      "trades",
+      url,
+      "--account",
+      account,
+      ...(chainId ? ["--chain_id", chainId.toString()] : []),
+      ...(pool ? ["--pool", pool] : []),
+    );
   }
 
   /** One quote by id, whatever its status. */

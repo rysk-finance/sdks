@@ -525,3 +525,32 @@ fn will_redeem_and_self_redeem_spell_the_cli_flags() {
         ]
     );
 }
+
+#[test]
+fn premium_trades_filters_only_when_given() {
+    let sdk = sdk();
+    assert_eq!(
+        sdk.premium_trades_args(MAKER, None, None, None),
+        ["premium", "trades", "--account", MAKER]
+    );
+    assert_eq!(
+        sdk.premium_trades_args(
+            MAKER,
+            Some(84532),
+            Some("0x6e37fb1f933f53f389a072277d7f942593a760dd"),
+            Some("http://x")
+        ),
+        [
+            "premium",
+            "trades",
+            "--account",
+            MAKER,
+            "--chain_id",
+            "84532",
+            "--pool",
+            "0x6e37fb1f933f53f389a072277d7f942593a760dd",
+            "--url",
+            "http://x"
+        ]
+    );
+}

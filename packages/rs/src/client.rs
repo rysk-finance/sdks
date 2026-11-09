@@ -8,7 +8,7 @@ pub const RELEASES_URL: &str = "https://github.com/rysk-finance/sdks/releases";
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks'
 /// `_minSdkVersion` / `_min_sdk_version`.
-const MIN_CLI_VERSION: (u64, u64, u64) = (5, 1, 0);
+const MIN_CLI_VERSION: (u64, u64, u64) = (5, 3, 0);
 
 const DEFAULT_CLI_PATH: &str = "./ryskV12";
 
@@ -406,6 +406,25 @@ impl Rysk {
         self.premium("quotes", &[("--maker", maker)], url)
     }
 
+    /// An account's settled trades, newest first, indexed from the chain: how a maker learns which of its quotes were filled.
+    pub fn premium_trades_args(
+        &self,
+        account: &str,
+        chain_id: Option<i64>,
+        pool: Option<&str>,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let chain_id = chain_id.filter(|id| *id != 0).map(|id| id.to_string());
+        let mut flags = vec![("--account", account)];
+        if let Some(id) = &chain_id {
+            flags.push(("--chain_id", id));
+        }
+        if let Some(pool) = pool.filter(|p| !p.is_empty()) {
+            flags.push(("--pool", pool));
+        }
+        self.premium("trades", &flags, url)
+    }
+
     /// One quote by id, whatever its status.
     pub fn premium_quote_status_args(&self, id: &str, url: Option<&str>) -> Vec<String> {
         self.premium("quote-status", &[("--id", id)], url)
@@ -615,6 +634,6 @@ mod tests {
     fn version_ordering_is_numeric_not_lexical() {
         assert!(parse_version("4.10.0") > parse_version("4.9.0"));
         assert!(parse_version("4.9.9") < Some(MIN_CLI_VERSION));
-        assert!(parse_version("5.1.0") >= Some(MIN_CLI_VERSION));
+        assert!(parse_version("5.3.0") >= Some(MIN_CLI_VERSION));
     }
 }

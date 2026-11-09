@@ -109,6 +109,24 @@ A quote stays on the book until it is taken, cancelled or past its
 `validUntil`. To keep a price standing, requote before the 10 minute window
 closes.
 
+### Knowing a quote was filled
+
+The api pushes nothing, so a maker polls. Two reads answer it:
+
+```sh
+ryskV12 premium trades --account <0xmaker> [--chain_id 84532] [--pool <0xpool>]
+ryskV12 premium quote-status --id <quote_id>
+```
+
+- **`trades`** (`GET /api/trades`) lists the account's settled trades, newest
+  first. Rows come from indexed chain events, so a trade shows once its
+  transaction is mined. Each row has `pool`, `action`, `otoken`,
+  `otokenSymbol`, `expiry`, `strike`, `isPut`, `quantity` (1e8),
+  `totalPremium`, `premiumAsset`, `timestamp` and `txHash`. A row does not name
+  the quote: match it on pool, option and quantity.
+- **`quote-status`** turns `TAKEN` as soon as the taker's transaction is sent,
+  before it is mined. The other quotes on that request turn `CANCELLED`.
+
 ### 4. The taker takes a quote
 
 ```sh
