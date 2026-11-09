@@ -7,6 +7,10 @@ on:
         description: "CLI version, without prefix (e.g. 4.0.0)"
         required: true
         type: string
+      release_sdks:
+        description: "Then release every sdk whose version is not tagged yet"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,3 +47,40 @@ jobs:
             packages/cli/ryskV12-linux-arm64
             packages/cli/ryskV12-darwin-amd64
             packages/cli/ryskV12-darwin-arm64
+
+  # Starts each sdk's own release workflow rather than calling it as a reusable
+  # one: pypi, npm and crates.io trust a publishing workflow by its file name,
+  # and a called workflow would publish as cli-release.yaml. A
+  # workflow_dispatch from GITHUB_TOKEN is one of the events that does start a
+  # run. Each sdk's release then checks for this cli release on its own.
+  release_sdks:
+    needs: build_and_publish
+    if: inputs.release_sdks
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Dispatch the sdk releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for sdk in ts py rs cpp; do
+            case "$sdk" in
+              ts) v=$(jq -r .version packages/ts/package.json) ;;
+              py) v=$(sed -n 's/^version *= *"\(.*\)"/\1/p' packages/py/pyproject.toml | head -n 1) ;;
+              rs) v=$(sed -n 's/^version *= *"\(.*\)"/\1/p' packages/rs/Cargo.toml | head -n 1) ;;
+              cpp) v=$(sed -n 's/^ *VERSION \([0-9][^ )]*\).*/\1/p' packages/cpp/CMakeLists.txt | head -n 1) ;;
+            esac
+            if git rev-parse -q --verify "refs/tags/$sdk-v$v" >/dev/null; then
+              echo "$sdk-v$v is already released, skipping"
+              continue
+            fi
+            gh workflow run "$sdk-release.yaml" --ref main
+            echo "dispatched $sdk-release.yaml for $sdk-v$v"
+          done
