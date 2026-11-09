@@ -11,6 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import Rysk, { Env } from "../dist/index.js";
+import { isRequest } from "../dist/models.js";
 
 const CLI = process.env.RYSK_CLI_PATH ?? "./ryskV12";
 // well known test key; its address is the maker below
@@ -42,10 +43,10 @@ const fakeApi = async (respond) => {
 
 const run = (sdk, args) =>
   new Promise((resolve) => {
-    const proc = sdk.execute(args.filter((arg) => arg !== ""));
+    const proc = sdk.execute(args);
     let stdout = "";
     let stderr = "";
-    proc.on("message", (data) => (stdout += data.toString()));
+    proc.on("message", (line) => (stdout += line.toString() + "\n"));
     proc.on("stderr", (data) => (stderr += data.toString()));
     proc.on("close", (code) => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }));
   });
@@ -71,6 +72,21 @@ const quote = (extra = {}) => ({
   ...extra,
 });
 
+test("open reaches a listener attached after execute", { skip: !available }, async () => {
+  const proc = sdk().execute(["version"]);
+  let opened = false;
+  proc.on("open", () => (opened = true));
+  await new Promise((resolve) => proc.on("close", resolve));
+  assert.ok(opened);
+});
+
+/** Writes quotes as a batch file and returns the args that post it. */
+const quoteBatchArgs = (rysk, url, ...entries) => {
+  const file = join(mkdtempSync(join(tmpdir(), "rysk-batch-")), "batch.json");
+  writeFileSync(file, rysk.premiumQuoteBatch(entries));
+  return rysk.premiumQuoteBatchArgs(file, url);
+};
+
 test("the cli signs and posts what the sdk built", { skip: !available }, async () => {
   const api = await fakeApi((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -78,7 +94,7 @@ test("the cli signs and posts what the sdk built", { skip: !available }, async (
   });
 
   try {
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", quote(), api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, '{"failures":[]}');
 
@@ -132,7 +148,7 @@ test("a rejected quote fails the command", { skip: !available }, async () => {
   });
 
   try {
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", quote(), api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: quote() }));
     assert.notEqual(result.code, 0, "the api answers 200, the exit code is the result");
     assert.match(result.stdout, /request expired/, "the response still reaches stdout");
     assert.match(result.stderr, /1 of 1 quotes rejected/);
@@ -184,6 +200,38 @@ test("cancel authenticates with headers, not a key in argv", { skip: !available 
   }
 });
 
+test("taker writes reach the api: request, cancel-request, execute", { skip: !available }, async () => {
+  const api = await fakeApi((req, res) => {
+    const bodies = {
+      "/api/quotes/7": `{"requestId":"r1","maker":"${MAKER}","price":"1","nonce":"11","signature":"0xab","validUntil":1767225000}`,
+      "/api/requests/r1": `{"asset":"${ASSET}","chainId":84532,"expiry":1767225600,"quantity":"1","strike":"1","taker":"${MAKER}","usd":"${ASSET}","collateralAsset":"${ASSET}","premiumAsset":"${ASSET}"}`,
+      [`/api/pools/${MAKER}`]: `{"optionHandler":"${HANDLER}"}`,
+    };
+    if (req.method === "GET") return res.writeHead(200).end(bodies[req.url]);
+    res.writeHead(req.url === "/api/execute" ? 201 : 204).end(req.url === "/api/execute" ? "0xfeed" : "");
+  });
+
+  try {
+    const rysk = sdk();
+    const file = join(mkdtempSync(join(tmpdir(), "rysk-")), "requests.json");
+    writeFileSync(file, '[{"taker":"0x1"}]');
+
+    assert.equal((await run(rysk, rysk.premiumRequestArgs(file, 84532, "5", api.url))).code, 0);
+    assert.equal(api.seen.at(-1).body, '[{"taker":"0x1"}]');
+    assert.equal(api.seen.at(-1).headers["x-nonce"], "5");
+
+    assert.equal((await run(rysk, rysk.premiumCancelRequestArgs("r1", 84532, "6", api.url))).code, 0);
+    assert.equal(`${api.seen.at(-1).method} ${api.seen.at(-1).path}`, "DELETE /api/requests/r1");
+
+    const executed = await run(rysk, rysk.premiumExecuteArgs("7", "8", api.url));
+    assert.equal(executed.code, 0, executed.stderr);
+    assert.equal(executed.stdout, "0xfeed");
+    assert.equal(JSON.parse(api.seen.at(-1).body).nonce, "8");
+  } finally {
+    api.close();
+  }
+});
+
 test("reads proxy the api verbatim", { skip: !available }, async () => {
   const api = await fakeApi((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -196,6 +244,9 @@ test("reads proxy the api verbatim", { skip: !available }, async () => {
       [rysk.premiumRequestsArgs(MAKER, api.url), "/api/requests/maker"],
       [rysk.premiumQuotesArgs(MAKER, api.url), "/api/quotes"],
       [rysk.premiumQuoteStatusArgs("9f31", api.url), "/api/quotes/9f31"],
+      [rysk.premiumPoolsArgs(api.url), "/api/pools"],
+      [rysk.premiumTakerRequestsArgs(MAKER, api.url), "/api/requests/taker"],
+      [rysk.premiumRequestQuotesArgs("b7c2", api.url), "/api/requests/b7c2/quotes"],
     ]) {
       const result = await run(rysk, args);
       assert.equal(result.code, 0, result.stderr);
@@ -216,7 +267,7 @@ test("the cli refuses a quote it cannot get accepted", { skip: !available }, asy
   try {
     // the window is checked before signing, so nothing reaches the api
     const tooFar = quote({ validUntil: Math.floor(Date.now() / 1000) + 3600 });
-    const result = await run(sdk(), sdk().premiumQuoteArgs("req-1", tooFar, api.url));
+    const result = await run(sdk(), quoteBatchArgs(sdk(), api.url, { requestId: "req-1", quote: tooFar }));
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /outside the api's window/);
     assert.equal(api.seen.length, 0, "a doomed quote must not cost a round trip");
@@ -224,3 +275,124 @@ test("the cli refuses a quote it cannot get accepted", { skip: !available }, asy
     api.close();
   }
 });
+
+// Opt in against the real testnet api (`make e2e` reads the keys from the repo's
+// .env): a taker opens an rfq only the maker may quote, the maker polls for it,
+// quotes, cancels and quotes again, and the taker takes the trade on chain. The
+// trade is real but costs the maker 1 wei; it relies on the maker's premium
+// allowance for the pool's option handler, which the go e2e sets up.
+const E2E_KEY = process.env.RYSK_E2E_PRIVATE_KEY;
+const E2E_MAKER = process.env.RYSK_E2E_MAKER?.toLowerCase();
+const E2E_TAKER_KEY = process.env.RYSK_E2E_TAKER_PRIVATE_KEY;
+const E2E_POOL = process.env.RYSK_E2E_POOL?.toLowerCase();
+const E2E_URL = process.env.RYSK_E2E_PREMIUM_URL || "https://insti-testnet.rysk.finance";
+// base sepolia's strike asset, which a request's usd has to be
+const E2E_USD = "0x98d56648c9b7f3cb49531f4135115b5000ab1733";
+
+test(
+  "testnet: open an rfq, quote, cancel, requote and take the trade",
+  { skip: !available || !E2E_KEY || !E2E_MAKER || !E2E_TAKER_KEY || !E2E_POOL },
+  async () => {
+    const maker = new Rysk(Env.TESTNET, E2E_KEY, CLI);
+    const taker = new Rysk(Env.TESTNET, E2E_TAKER_KEY, CLI);
+    const ok = async (sdk, args) => {
+      const result = await run(sdk, args);
+      assert.equal(result.code, 0, `${args[1]}: ${result.stderr}\n${result.stdout}`);
+      return result.stdout;
+    };
+    const json = async (sdk, args) => JSON.parse((await ok(sdk, args)) || "[]");
+    // unix nanoseconds: spent once per address, fresh across runs
+    let last = 0n;
+    const nonce = () => {
+      last = BigInt(Date.now()) * 1_000_000n > last ? BigInt(Date.now()) * 1_000_000n : last + 1n;
+      return last.toString();
+    };
+
+    // 1. the taker opens a request on the pool, only this maker may quote
+    const pool = (await json(taker, taker.premiumPoolsArgs(E2E_URL))).find((p) => p.address.toLowerCase() === E2E_POOL);
+    assert.ok(pool, `pool ${E2E_POOL} is not listed`);
+    const expiry = new Date();
+    expiry.setUTCHours(8, 0, 0, 0);
+    expiry.setUTCDate(expiry.getUTCDate() + 7);
+    while (expiry.getUTCDay() !== 5) expiry.setUTCDate(expiry.getUTCDate() + 1);
+    const file = join(mkdtempSync(join(tmpdir(), "rysk-e2e-")), "requests.json");
+    writeFileSync(
+      file,
+      JSON.stringify([
+        {
+          asset: pool.underlying,
+          chainId: pool.chainId,
+          expiry: Math.floor(expiry.getTime() / 1000),
+          isPut: pool.type === "Put",
+          isTakerBuy: false,
+          quantity: "1000000000000000000",
+          strike: "100000000000000",
+          taker: pool.address,
+          usd: E2E_USD,
+          collateralAsset: pool.asset,
+          premiumAsset: pool.asset,
+          isPremium: true,
+          makers: [E2E_MAKER],
+          validUntil: Date.now() + 5 * 60_000,
+        },
+      ]),
+    );
+    await ok(taker, taker.premiumRequestArgs(file, pool.chainId, nonce(), E2E_URL));
+
+    // 2. the maker polls its requests until that one shows up
+    let request;
+    for (let i = 0; i < 30 && !request; i++) {
+      request = (await json(maker, maker.premiumRequestsArgs(E2E_MAKER, E2E_URL)))
+        .filter((r) => isRequest(r) && r.taker.toLowerCase() === E2E_POOL)
+        .at(-1);
+      if (!request) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    assert.ok(request, `no request from ${E2E_POOL} listed for ${E2E_MAKER}`);
+
+    const quote = async () => {
+      const n = nonce();
+      await ok(
+        maker,
+        quoteBatchArgs(maker, E2E_URL, {
+          requestId: request.id,
+          quote: {
+            assetAddress: request.asset,
+            chainId: request.chainId,
+            expiry: request.expiry,
+            isPut: request.isPut,
+            isTakerBuy: Boolean(request.isTakerBuy),
+            quantity: request.quantity,
+            strike: request.strike,
+            usd: request.usd,
+            collateralAsset: request.collateralAsset,
+            maker: E2E_MAKER,
+            nonce: n,
+            price: "1",
+            validUntil: Math.floor(Date.now() / 1000) + 300,
+            domain: request.typeDataDomain,
+          },
+        }),
+      );
+      return n;
+    };
+    const onBook = async (n) =>
+      (await json(maker, maker.premiumQuotesArgs(E2E_MAKER, E2E_URL))).find((q) => String(q.nonce) === n)?.id;
+
+    // 3-4. quote, then cancel it off the book
+    const first = await quote();
+    const id = await onBook(first);
+    assert.ok(id, `quote with nonce ${first} is not in the maker's live quotes`);
+    await ok(maker, maker.premiumCancelArgs(String(id), request.chainId, nonce(), E2E_URL));
+    assert.equal(await onBook(first), undefined, `quote ${id} is still live after cancel`);
+
+    // 5-6. quote again, and the taker takes it from the request's book
+    const second = await quote();
+    const picked = (await json(taker, taker.premiumRequestQuotesArgs(request.id, E2E_URL))).find(
+      (q) => String(q.nonce) === second,
+    );
+    assert.ok(picked, `quote with nonce ${second} is not on request ${request.id}'s book`);
+    const tx = await ok(taker, taker.premiumExecuteArgs(String(picked.id), nonce(), E2E_URL));
+    assert.match(tx, /^0x[0-9a-f]{64}$/i);
+    assert.equal(await onBook(second), undefined, `quote ${picked.id} is still live after the trade`);
+  },
+);

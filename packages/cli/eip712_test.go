@@ -245,3 +245,15 @@ func TestQuotePayloadCarriesPremiumAsset(t *testing.T) {
 		t.Errorf("premiumAsset missing from payload: %s", encoded)
 	}
 }
+
+// cc signs eth sepolia against this contract; a chain missing from ADDRESSES
+// signs against the zero address and every quote and transfer is rejected.
+func TestCreateTypedDataDomainEthSepolia(t *testing.T) {
+	domain, err := CreateTypedDataDomain(int64(CHAIN_ID_ETH_SEPOLIA), TypedDataDomainOverride{})
+	if err != nil {
+		t.Fatalf("CreateTypedDataDomain: %v", err)
+	}
+	if want := "0x166e38f44EBd5e82E9a4095e5FC24D52D6F01617"; !strings.EqualFold(domain.VerifyingContract, want) {
+		t.Errorf("got verifying contract %s, want %s", domain.VerifyingContract, want)
+	}
+}

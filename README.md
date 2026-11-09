@@ -11,9 +11,19 @@ Monorepo for the Rysk client stack: the Go CLI and the SDKs that wrap it.
 | C++ SDK | [`packages/cpp`](packages/cpp) | source, via CMake | `cpp-vX.Y.Z` |
 
 The SDKs do not reimplement the protocol — they spawn the CLI binary and talk
-to it over JSON-RPC on stdio. Published SDK packages download the CLI from this
+to it over stdio. A websocket connection is one long-lived `connect` process:
+server messages come out on its stdout, and the SDK writes commands (quotes,
+transfers, account reads) to its stdin, where they are signed and sent in that
+same process. Published SDK packages download the CLI from this
 repo's releases (`scripts/fetch_latest_release.sh`, picking the newest `cli-v*`
 release). Point them elsewhere with `RYSK_CLI_REPO` / `RYSK_CLI_TAG_PREFIX`.
+
+How the two RFQ flows work end to end, whichever package you use:
+
+- [`docs/v12.md`](docs/v12.md): the websocket auction. Makers listen for RFQs,
+  bid in real time and pay premiums from a deposited balance.
+- [`docs/premium.md`](docs/premium.md): the HTTP premium RFQ. A pool opens
+  requests, makers post signed quotes, and the pool takes one on chain.
 
 Each SDK declares the oldest CLI it works with, and warns (or fails, under
 `strict_version`) when the binary it finds is older. Release the CLI before the
@@ -32,7 +42,7 @@ make help        # everything else
 
 `make dev-bin` puts a locally built binary at `packages/ts/ryskV12`,
 `packages/py/ryskV12cli`, `packages/rs/ryskV12` and `packages/cpp/ryskV12` — the paths each SDK's
-examples and integration tests already look in — so they exercise your working
+integration tests already look in — so they exercise your working
 tree, not a published release. Every SDK's integration tests skip themselves
 when that binary is absent.
 

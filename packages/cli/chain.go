@@ -14,6 +14,7 @@ import (
 
 const (
 	CHAIN_ID_ETH           int = 1
+	CHAIN_ID_ETH_SEPOLIA   int = 11155111
 	CHAIN_ID_BASE          int = 8453
 	CHAIN_ID_HYPE          int = 999
 	CHAIN_ID_BASE_SEPOLIA  int = 84532
@@ -39,6 +40,12 @@ var ADDRESSES = map[int]Addresses{
 		MarginPool:  common.HexToAddress("0x684404f2aebad87a6803f13741b1d638bfe2c671"),
 		MMarket:     common.HexToAddress("0xc01c9ef5de5862354add9501a29e8765cff01c32"),
 		StrikeAsset: common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7"),
+	},
+	CHAIN_ID_ETH_SEPOLIA: {
+		Rysk:        common.HexToAddress("0x166e38f44EBd5e82E9a4095e5FC24D52D6F01617"),
+		MarginPool:  common.HexToAddress("0xBBC518BbB8FFA3720DB66C2Bdff2a57009280b1b"),
+		MMarket:     common.HexToAddress("0x27809a3Bd3cf44d855f1BE668bFD16D34bcE157C"),
+		StrikeAsset: common.HexToAddress("0xdA6c2B2BB2296a403D97a7D1F4e064C99a0e6A9A"),
 	},
 	CHAIN_ID_BASE_SEPOLIA: {
 		Rysk:        common.HexToAddress("0x0ff34dd648b68f09b199b60b91442e750fd13fdc"),
@@ -102,18 +109,13 @@ func (a *Account) newTransactionOpts(ctx context.Context, chainID int, c ethclie
 	return opts, nil
 }
 
-func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address) (txHash string, err error) {
+func (a *Account) approve(ctx context.Context, chainID int, client ethclient.Client, amount *big.Int, asset common.Address, spender common.Address) (txHash string, err error) {
 	opts, err := a.newTransactionOpts(ctx, chainID, client)
-	if err != nil {
-		return "", nil
-	}
-
-	erc20, err := NewIERC20(asset, &client)
 	if err != nil {
 		return "", err
 	}
 
-	tx, err := erc20.Approve(opts, ADDRESSES[chainID].MMarket, amount)
+	tx, err := erc20(asset, &client).Transact(opts, "approve", spender, amount)
 	if err != nil {
 		return "", err
 	}

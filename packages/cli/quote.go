@@ -4,104 +4,97 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/urfave/cli/v2"
 )
 
-var quoteAction = &cli.Command{
+var quoteAction = &Command{
 	Name:  "quote",
 	Usage: "Send a quote",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "channel_id",
-			Required: true,
-			Usage:    "the socket id to send messages into",
-		},
-		&cli.StringFlag{
+	Flags: []Flag{
+		&StringFlag{
 			Name:     "rfq_id",
 			Required: true,
 			Usage:    "the rfq id to respond to",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "asset",
 			Required: true,
 			Usage:    "asset address",
 		},
-		&cli.IntFlag{
+		&IntFlag{
 			Name:     "chain_id",
 			Required: true,
 		},
-		&cli.Int64Flag{
+		&Int64Flag{
 			Name:     "expiry",
 			Required: true,
 		},
-		&cli.BoolFlag{
+		&BoolFlag{
 			Name: "is_put",
 		},
-		&cli.BoolFlag{
+		&BoolFlag{
 			Name: "is_taker_buy",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "maker",
 			Required: true,
 		},
-		&cli.Uint64Flag{
+		&Uint64Flag{
 			Name:     "nonce",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "price",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "quantity",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "strike",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "valid_until",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "usd",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "collateral",
 			Required: true,
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:     "private_key",
 			Required: true,
 			Usage:    "private key to sign messages with",
 			EnvVars:  []string{"RYSK_PRIVATE_KEY"},
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "premium_asset",
 			Usage: "asset the premium is paid in, omitted from the quote when not set",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_name",
 			Usage: "EIP712 domain name, required with the other domain flags",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_version",
 			Usage: "EIP712 domain version, required with the other domain flags",
 		},
-		&cli.StringFlag{
+		&StringFlag{
 			Name:  "domain_verifying_contract",
 			Usage: "EIP712 domain verifying contract, required with the other domain flags",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return quote(c)
 	},
 }
 
-func quote(c *cli.Context) error {
-	channelID := c.String("channel_id")
+func quote(c *Context) error {
 	rfq_id := c.String("rfq_id")
 	pk := c.String("private_key")
 
@@ -152,5 +145,5 @@ func quote(c *cli.Context) error {
 	q.Signature = sig
 	payload.Params = q
 
-	return writeToSocket(channelID, payload)
+	return send(payload)
 }

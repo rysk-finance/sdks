@@ -2,30 +2,24 @@ package main
 
 import (
 	"strings"
-
-	"github.com/urfave/cli/v2"
 )
 
-var positionsAction = &cli.Command{
-	Name: "positions",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "channel_id",
-			Required: true,
-			Usage:    "the socket id to send messages into",
-		},
-		&cli.StringFlag{
+var positionsAction = &Command{
+	Name:  "positions",
+	Usage: "request the account's positions over the connection",
+	Flags: []Flag{
+		&StringFlag{
 			Name:     "account",
 			Required: true,
 			Usage:    "address of the account to get positions for",
 		},
 	},
-	Action: func(c *cli.Context) error {
+	Action: func(c *Context) error {
 		return positions(c)
 	},
 }
 
-func positions(c *cli.Context) error {
+func positions(c *Context) error {
 	account := strings.ToLower(c.String("account"))
 
 	payload := JsonRPCRequest{
@@ -37,5 +31,5 @@ func positions(c *cli.Context) error {
 		},
 	}
 
-	return writeToSocket(c.String("channel_id"), payload)
+	return send(payload)
 }

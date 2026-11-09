@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -78,22 +79,27 @@ def test_no_arg_builder_carries_the_private_key(sdk):
     transfer = Transfer(
         user=MAKER, amount="1", asset=ASSET, chain_id=84532, is_deposit=True, nonce="1"
     )
-    premium_quote = quote(domain=TypedDataDomain(verifyingContract=HANDLER))
 
     builders = [
-        sdk.connect_args("chan", "maker"),
-        sdk.disconnect_args("chan"),
+        sdk.connect_args("maker"),
         sdk.approve_args(84532, "1", "https://rpc"),
-        sdk.balances_args("chan", MAKER),
-        sdk.positions_args("chan", MAKER),
-        sdk.transfer_args("chan", transfer),
-        sdk.quote_args("chan", "rfq", quote()),
+        sdk.balances_args(MAKER),
+        sdk.positions_args(MAKER),
+        sdk.transfer_args(transfer),
+        sdk.quote_args("rfq", quote()),
         sdk.premium_requests_args(MAKER),
         sdk.premium_quotes_args(MAKER),
         sdk.premium_quote_status_args("id"),
-        sdk.premium_quote_args("rfq", premium_quote),
         sdk.premium_quote_batch_args("batch.json"),
         sdk.premium_cancel_args("id", 84532, "43"),
+        sdk.premium_pools_args(),
+        sdk.premium_request_args("requests.json", 84532, "43"),
+        sdk.premium_taker_requests_args(MAKER),
+        sdk.premium_request_quotes_args("id"),
+        sdk.premium_cancel_request_args("id", 84532, "43"),
+        sdk.premium_execute_args("id", "43"),
+        sdk.will_redeem_args(84532, MAKER, ASSET, True, "1"),
+        sdk.self_redeem_args(84532, "1"),
     ]
 
     for args in builders:
@@ -101,19 +107,37 @@ def test_no_arg_builder_carries_the_private_key(sdk):
         assert "test-key" not in args, args[:2]
 
 
-def test_connect_and_disconnect(sdk):
-    assert sdk.connect_args("chan", "maker") == [
+def test_connect(sdk):
+    assert sdk.connect_args("maker") == [
         "connect",
-        "--channel_id",
-        "chan",
         "--url",
         "wss://rip-testnet.rysk.finance/maker",
     ]
-    assert sdk.disconnect_args("chan") == ["disconnect", "--channel_id", "chan"]
+
+
+def test_send_writes_one_json_line_per_command():
+    """cat stands in for connect: whatever send writes comes straight back."""
+    sdk = Rysk(Env.TESTNET, "test-key", v12_cli_path="cat")
+    args = sdk.balances_args(MAKER)
+
+    proc = sdk.execute([])
+    sdk.send(proc, args)
+    assert json.loads(proc.stdout.readline()) == args
+    proc.terminate()
+
+    async def via_async():
+        lines = []
+        proc = await sdk.execute_async([], lines.append)
+        sdk.send(proc, args)
+        proc.stdin.close()
+        await asyncio.gather(*sdk._readers)  # the reader ends at eof
+        return lines
+
+    assert [json.loads(line) for line in asyncio.run(via_async())] == [args]
 
 
 def test_quote_passes_terms_and_flags(sdk):
-    args = sdk.quote_args("chan", "rfq-1", quote(isTakerBuy=True))
+    args = sdk.quote_args("rfq-1", quote(isTakerBuy=True))
 
     assert flag_value(args, "--rfq_id") == "rfq-1"
     assert flag_value(args, "--asset") == ASSET
@@ -122,34 +146,37 @@ def test_quote_passes_terms_and_flags(sdk):
     assert "--is_put" in args
     assert "--is_taker_buy" in args
 
-    call = sdk.quote_args("chan", "rfq-1", quote(isPut=False, isTakerBuy=False))
+    call = sdk.quote_args("rfq-1", quote(isPut=False, isTakerBuy=False))
     assert "--is_put" not in call
     assert "--is_taker_buy" not in call
 
 
 def test_quote_sends_premium_asset_only_when_set(sdk):
-    with_asset = sdk.quote_args("chan", "rfq", quote(premiumAsset=HANDLER))
+    with_asset = sdk.quote_args("rfq", quote(premiumAsset=HANDLER))
     assert flag_value(with_asset, "--premium_asset") == HANDLER
-    assert "--premium_asset" not in sdk.quote_args("chan", "rfq", quote())
-
-
-def test_premium_quote_carries_domain_and_request_id(sdk):
-    domain = TypedDataDomain(
-        name="PremiumOptionHandler", version="1", verifyingContract=HANDLER
-    )
-    args = sdk.premium_quote_args("req-1", quote(domain=domain))
-
-    assert args[:2] == ["premium", "quote"]
-    assert flag_value(args, "--request_id") == "req-1"
-    assert flag_value(args, "--domain_name") == "PremiumOptionHandler"
-    assert flag_value(args, "--domain_version") == "1"
-    assert flag_value(args, "--domain_verifying_contract") == HANDLER
+    assert "--premium_asset" not in sdk.quote_args("rfq", quote())
 
 
 def test_premium_url_only_passed_when_given(sdk):
     assert "--url" not in sdk.premium_requests_args(MAKER)
     args = sdk.premium_requests_args(MAKER, "http://localhost:8080")
     assert flag_value(args, "--url") == "http://localhost:8080"
+
+
+def test_premium_taker_builders(sdk):
+    url = "http://localhost:8080"
+    assert sdk.premium_pools_args() == ["premium", "pools"]
+    assert sdk.premium_request_args("-", 84532, "43", url) == [
+        "premium", "request", "--batch", "-", "--chain_id", "84532", "--nonce", "43", "--url", url,
+    ]
+    assert sdk.premium_taker_requests_args(MAKER) == ["premium", "taker-requests", "--taker", MAKER]
+    assert sdk.premium_request_quotes_args("r1") == ["premium", "request-quotes", "--id", "r1"]
+    assert sdk.premium_cancel_request_args("r1", 84532, "43") == [
+        "premium", "cancel-request", "--id", "r1", "--chain_id", "84532", "--nonce", "43",
+    ]
+    assert sdk.premium_execute_args("q1", "43", url) == [
+        "premium", "execute", "--quote_id", "q1", "--nonce", "43", "--url", url,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -168,23 +195,17 @@ def test_premium_url_only_passed_when_given(sdk):
 )
 def test_premium_rejects_unsignable_domains(sdk, domain, message):
     with pytest.raises(ValueError, match=message):
-        sdk.premium_quote_args("req", quote(domain=domain))
+        sdk.premium_quote_batch([("req", quote(domain=domain))])
 
 
 def test_premium_accepts_a_matching_hex_chain_id(sdk):
     domain = TypedDataDomain(verifyingContract=HANDLER, chainId="0x14a34")
-    assert sdk.premium_quote_args("req", quote(domain=domain))
+    assert sdk.premium_quote_batch([("req", quote(domain=domain))])
 
 
 def test_websocket_quote_needs_a_whole_domain(sdk):
     with pytest.raises(ValueError, match="missing version, verifyingContract"):
-        sdk.quote_args("chan", "rfq", quote(domain=TypedDataDomain(name="rysk")))
-
-
-def test_premium_defaults_the_domain_name(sdk):
-    args = sdk.premium_quote_args("req", quote(domain=TypedDataDomain(verifyingContract=HANDLER)))
-    assert "--domain_name" not in args
-    assert flag_value(args, "--domain_verifying_contract") == HANDLER
+        sdk.quote_args("rfq", quote(domain=TypedDataDomain(name="rysk")))
 
 
 def test_premium_quote_batch_serialises_entries(sdk):
@@ -367,3 +388,16 @@ def test_a_successful_call_has_no_error():
     )
     assert res.error is None
     assert res.result == {"ok": True}
+
+
+def test_will_redeem_and_self_redeem(sdk):
+    assert sdk.will_redeem_args(84532, MAKER, ASSET, True, "7") == [
+        "will_redeem", "--chain_id", "84532", "--account", MAKER, "--otoken", ASSET, "--nonce", "7", "--will_redeem",
+    ]
+    assert "--will_redeem" not in sdk.will_redeem_args(84532, MAKER, ASSET, False, "7")
+    assert sdk.self_redeem_args(84532, "8") == [
+        "self-redeem", "--url", "https://rip-testnet.rysk.finance", "--chain_id", "84532", "--nonce", "8",
+    ]
+    assert sdk.self_redeem_args(84532, "8", 1767225600, [ASSET, MAKER], "http://x")[2:] == [
+        "http://x", "--chain_id", "84532", "--nonce", "8", "--expiry", "1767225600", "--exclude_assets", f"{ASSET},{MAKER}",
+    ]

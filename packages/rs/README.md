@@ -11,7 +11,7 @@ three sdks agree on flags by construction.
 
 ```toml
 [dependencies]
-ryskv12 = "4"
+ryskv12 = "5"
 ```
 
 The cli binary is not bundled. Either download it from
@@ -53,12 +53,65 @@ let quote = Quote {
     domain: request.type_data_domain.clone(),
 };
 
-let args = sdk.premium_quote_args(&request_id, &quote, None)?;
+// quotes are posted as a batch: a json array, from a file or `-` for stdin
+std::fs::write("quotes.json", sdk.premium_quote_batch(&[(request_id, quote)])?)?;
+let args = sdk.premium_quote_batch_args("quotes.json", None);
 let status = sdk.execute_lines(&args, |line| println!("{line}"))?;
 ```
 
 Every `*_args` method is pure: it returns what the cli would be given without
 running anything, so you can assert on the whole surface without a binary.
+
+### Taking (premium rfq)
+
+A request's taker is a pool; the sdk's key has to be one of the pool's on chain
+rfq signers. A request's `validUntil` is in **milliseconds**; see the cli README
+for its fields.
+
+```rust
+sdk.premium_pools_args(None);
+// a json array of requests as the api takes them; answers with no body
+sdk.premium_request_args("requests.json", chain_id, &nonces.next()?, None);
+sdk.premium_taker_requests_args(&pool, None); // the pool's live requests
+sdk.premium_request_quotes_args(&request_id, None); // the quotes on one
+sdk.premium_cancel_request_args(&request_id, chain_id, &nonces.next()?, None);
+// take a quote: prints the settling transaction's hash
+sdk.premium_execute_args(&quote_id, &nonces.next()?, None);
+```
+
+## The websocket flow
+
+Spawn `connect` once per endpoint and keep it. Websocket commands - quotes,
+transfers, balances, positions, `will_redeem_args` - are written to its stdin with `ryskv12::send`: the
+running cli signs each one and sends it, no process per command.
+
+```rust
+use std::io::{BufRead, BufReader};
+
+let mut maker = sdk.execute(&sdk.connect_args("maker"))?;
+let mut commands = maker.stdin.take().unwrap();
+let replies = BufReader::new(maker.stdout.take().unwrap());
+
+ryskv12::send(&mut commands, &sdk.balances_args(&maker_address))?;
+ryskv12::send(&mut commands, &sdk.quote_args(&rfq_id, &quote)?)?;
+for line in replies.lines() {
+    println!("{}", line?); // one json-rpc message per line
+}
+```
+
+Redeeming your own expired otokens is a plain http call to this env's api, run
+on its own rather than sent into a connection:
+
+```rust
+let out = sdk.execute(&sdk.self_redeem_args(84532, "45", None, &[], None))?.wait_with_output()?;
+
+maker.kill()?; // disconnect
+```
+
+A listen-only connection, like `connect_args(&format!("rfqs/{asset}"))`, can go
+through `execute_lines` instead. A command the cli rejects comes back on
+stdout as a json-rpc error under the id the server would have used; the
+connection stays up.
 
 ## Approving and depositing
 

@@ -1,32 +1,35 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
-
-	"github.com/urfave/cli/v2"
 )
 
 // updated at build time
 var Version = ""
 
-func main() {
-	app := &cli.App{
-		Name: "ryskV12",
-		Commands: []*cli.Command{
-			approveAction,
-			balancesAction,
-			connectAction,
-			disconnectAction,
-			positionsAction,
-			premiumAction,
-			quoteAction,
-			transferAction,
-			versionAction,
-		},
-	}
+var app = &Command{
+	Name: "ryskV12",
+	Subcommands: []*Command{
+		approveAction,
+		balancesAction,
+		confirmAction,
+		connectAction,
+		inventoryAction,
+		positionsAction,
+		premiumAction,
+		quoteAction,
+		requestAction,
+		selfRedeemAction,
+		transferAction,
+		versionAction,
+		willRedeemAction,
+	},
+}
 
-	if err := app.Run(os.Args); err != nil {
+func main() {
+	if err := app.Run(context.Background(), os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
 }

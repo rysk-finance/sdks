@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"math/big"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 	crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 	"github.com/goccy/go-json"
-	"github.com/urfave/cli/v2"
 )
 
 const testPrivateKey = "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
@@ -75,13 +75,7 @@ func testPremiumQuoteInput(t *testing.T) premiumQuoteInput {
 
 // runPremium drives the command the way the binary does, flags and all.
 func runPremium(args ...string) error {
-	app := &cli.App{
-		Name:      "ryskV12",
-		Commands:  []*cli.Command{premiumAction},
-		Writer:    io.Discard,
-		ErrWriter: io.Discard,
-	}
-	return app.Run(append([]string{"ryskV12", "premium"}, args...))
+	return premiumAction.Run(context.Background(), args)
 }
 
 // captureStdout collects what a command prints, since the api's response is the
@@ -370,26 +364,9 @@ func TestPremiumQuotePostsOnlyTransportFields(t *testing.T) {
 	defer server.Close()
 
 	input := testPremiumQuoteInput(t)
+	file := writeBatch(t, input)
 	_, err := captureStdout(t, func() error {
-		return runPremium(
-			"quote",
-			"--url", server.URL,
-			"--request_id", input.RequestID,
-			"--asset", input.AssetAddress,
-			"--chain_id", strconv.Itoa(input.ChainID),
-			"--expiry", strconv.FormatInt(input.Expiry, 10),
-			"--is_put",
-			"--strike", input.Strike,
-			"--quantity", input.Quantity,
-			"--usd", input.USD,
-			"--collateral", input.CollateralAsset,
-			"--maker", input.Maker,
-			"--nonce", input.Nonce,
-			"--price", input.Price,
-			"--valid_until", strconv.FormatInt(input.ValidUntil, 10),
-			"--private_key", testPrivateKey,
-			"--domain_verifying_contract", testOptionHandler,
-		)
+		return runPremium("quote", "--url", server.URL, "--batch", file, "--private_key", testPrivateKey)
 	})
 	if err != nil {
 		t.Fatalf("premium quote: %v", err)
@@ -493,49 +470,20 @@ func TestPremiumQuoteRejectsBeforeAnyCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	input := testPremiumQuoteInput(t)
-	base := func() []string {
-		return []string{
-			"quote",
-			"--url", server.URL,
-			"--request_id", input.RequestID,
-			"--asset", input.AssetAddress,
-			"--chain_id", strconv.Itoa(input.ChainID),
-			"--expiry", strconv.FormatInt(input.Expiry, 10),
-			"--strike", input.Strike,
-			"--quantity", input.Quantity,
-			"--usd", input.USD,
-			"--collateral", input.CollateralAsset,
-			"--maker", input.Maker,
-			"--price", input.Price,
-			"--private_key", testPrivateKey,
-		}
+	cases := map[string]func(*premiumQuoteInput){
+		"valid until in ms":         func(q *premiumQuoteInput) { q.ValidUntil = time.Now().Add(5 * time.Minute).UnixMilli() },
+		"valid until out of window": func(q *premiumQuoteInput) { q.ValidUntil = time.Now().Add(30 * time.Minute).Unix() },
+		"bad nonce":                 func(q *premiumQuoteInput) { q.Nonce = "not-a-number" },
+		"no verifying contract":     func(q *premiumQuoteInput) { q.Domain = nil },
 	}
-
-	cases := map[string][]string{
-		"valid until in ms": {
-			"--nonce", "1",
-			"--valid_until", strconv.FormatInt(time.Now().Add(5*time.Minute).UnixMilli(), 10),
-			"--domain_verifying_contract", testOptionHandler,
-		},
-		"valid until out of window": {
-			"--nonce", "2",
-			"--valid_until", strconv.FormatInt(time.Now().Add(30*time.Minute).Unix(), 10),
-			"--domain_verifying_contract", testOptionHandler,
-		},
-		"bad nonce": {
-			"--nonce", "not-a-number",
-			"--valid_until", strconv.FormatInt(input.ValidUntil, 10),
-			"--domain_verifying_contract", testOptionHandler,
-		},
-		"no verifying contract": {
-			"--nonce", "3",
-			"--valid_until", strconv.FormatInt(input.ValidUntil, 10),
-		},
-	}
-	for name, extra := range cases {
-		args := append(base(), extra...)
-		if _, err := captureStdout(t, func() error { return runPremium(args...) }); err == nil {
+	for name, mutate := range cases {
+		// a valid quote first: one bad entry fails the whole batch
+		bad := testPremiumQuoteInput(t)
+		mutate(&bad)
+		file := writeBatch(t, testPremiumQuoteInput(t), bad)
+		if _, err := captureStdout(t, func() error {
+			return runPremium("quote", "--url", server.URL, "--batch", file, "--private_key", testPrivateKey)
+		}); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
@@ -545,20 +493,22 @@ func TestPremiumQuoteRejectsBeforeAnyCall(t *testing.T) {
 	}
 }
 
-func TestPremiumQuoteBatchIsExclusive(t *testing.T) {
-	file := t.TempDir() + "/batch.json"
-	if err := os.WriteFile(file, []byte("[]"), 0o600); err != nil {
-		t.Fatalf("write batch: %v", err)
-	}
-
-	err := runPremium("quote", "--batch", file, "--private_key", testPrivateKey, "--nonce", "1")
-	if err == nil || !strings.Contains(err.Error(), "--batch cannot be combined with --nonce") {
-		t.Errorf("got %v, want a mutual exclusion error", err)
-	}
-
-	if err := runPremium("quote", "--batch", file, "--private_key", testPrivateKey); err == nil {
+func TestPremiumQuoteRejectsAnEmptyBatch(t *testing.T) {
+	if err := runPremium("quote", "--batch", writeBatch(t), "--private_key", testPrivateKey); err == nil {
 		t.Error("an empty batch has to be an error")
 	}
+}
+
+// writeBatch writes quotes as the batch file premium quote reads.
+func writeBatch(t *testing.T, inputs ...premiumQuoteInput) string {
+	t.Helper()
+	data, err := json.Marshal(append([]premiumQuoteInput{}, inputs...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := t.TempDir() + "/batch.json"
+	writeFile(t, file, string(data))
+	return file
 }
 
 func TestPremiumReadsProxyTheApi(t *testing.T) {

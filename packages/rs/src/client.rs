@@ -1,5 +1,5 @@
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
 
 use crate::error::Error;
 use crate::models::{Quote, Transfer, TypedDataDomain};
@@ -8,7 +8,7 @@ pub const RELEASES_URL: &str = "https://github.com/rysk-finance/sdks/releases";
 
 /// Oldest cli this sdk will not warn about. Kept in step with the other sdks'
 /// `_minSdkVersion` / `_min_sdk_version`.
-const MIN_CLI_VERSION: (u64, u64, u64) = (4, 0, 0);
+const MIN_CLI_VERSION: (u64, u64, u64) = (5, 1, 0);
 
 const DEFAULT_CLI_PATH: &str = "./ryskV12";
 
@@ -60,6 +60,21 @@ fn take_leading_digits(s: &str) -> Option<u64> {
 fn pair(args: &mut Vec<String>, flag: &str, value: impl AsRef<str>) {
     args.push(flag.to_string());
     args.push(value.as_ref().to_string());
+}
+
+/// Writes one command into a running `connect`, which signs it and sends it over
+/// its websocket - no process per command. `args` are what a `*_args` builder
+/// returns, e.g. [`Rysk::quote_args`].
+///
+/// Take `child.stdin` from a connect spawned with [`Rysk::execute`] and keep it.
+/// Dropping it stops further commands but not the connection; `child.kill()`
+/// disconnects. A command the cli rejects comes back on stdout as a json-rpc
+/// error, under the id the server would have answered with.
+pub fn send(stdin: &mut ChildStdin, args: &[String]) -> Result<(), Error> {
+    let mut line = serde_json::to_string(args)?;
+    line.push('\n');
+    stdin.write_all(line.as_bytes())?;
+    Ok(stdin.flush()?)
 }
 
 /// Builds argument lists for the `ryskV12` cli and spawns it.
@@ -139,6 +154,7 @@ impl Rysk {
         let mut cmd = Command::new(&self.cli_path);
         cmd.args(args)
             .env("RYSK_PRIVATE_KEY", &self.private_key)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         cmd
@@ -152,6 +168,9 @@ impl Rysk {
     /// Spawns the cli and hands each line of its stdout to `on_line`, returning
     /// the exit status once it closes. This is the blocking twin of the other
     /// sdks' `execute_async`.
+    ///
+    /// The child keeps its stdin, so a connect run through this stays up but only
+    /// listens: to [`send`] it commands, spawn it with [`Rysk::execute`] instead.
     pub fn execute_lines(
         &self,
         args: &[String],
@@ -172,8 +191,6 @@ impl Rysk {
     /// This blocks: the sdk cannot spawn a binary that is still downloading.
     #[cfg(unix)]
     pub fn setup(&self) -> Result<String, Error> {
-        use std::io::Write;
-
         // The script ships inside the crate, so it is written out and run rather
         // than shelled out to from a path that only exists in a repo checkout.
         let mut child = Command::new("sh")
@@ -260,22 +277,9 @@ impl Rysk {
 
     // ----------------------------------------------------------- arg builders
 
-    pub fn connect_args(&self, channel_id: &str, uri: &str) -> Vec<String> {
-        vec![
-            "connect".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--url".into(),
-            self.url(uri),
-        ]
-    }
-
-    pub fn disconnect_args(&self, channel_id: &str) -> Vec<String> {
-        vec![
-            "disconnect".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-        ]
+    /// Commands for this connection go in on its stdin, through [`send`].
+    pub fn connect_args(&self, uri: &str) -> Vec<String> {
+        vec!["connect".into(), "--url".into(), self.url(uri)]
     }
 
     /// `asset` is the erc20 to approve. Left out, the cli falls back to the
@@ -297,29 +301,16 @@ impl Rysk {
         args
     }
 
-    pub fn balances_args(&self, channel_id: &str, account: &str) -> Vec<String> {
-        vec![
-            "balances".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--account".into(),
-            account.into(),
-        ]
+    pub fn balances_args(&self, account: &str) -> Vec<String> {
+        vec!["balances".into(), "--account".into(), account.into()]
     }
 
-    pub fn positions_args(&self, channel_id: &str, account: &str) -> Vec<String> {
-        vec![
-            "positions".into(),
-            "--channel_id".into(),
-            channel_id.into(),
-            "--account".into(),
-            account.into(),
-        ]
+    pub fn positions_args(&self, account: &str) -> Vec<String> {
+        vec!["positions".into(), "--account".into(), account.into()]
     }
 
-    pub fn transfer_args(&self, channel_id: &str, transfer: &Transfer) -> Vec<String> {
+    pub fn transfer_args(&self, transfer: &Transfer) -> Vec<String> {
         let mut args = vec!["transfer".to_string()];
-        pair(&mut args, "--channel_id", channel_id);
         pair(&mut args, "--chain_id", transfer.chain_id.to_string());
         pair(&mut args, "--user", &transfer.user);
         pair(&mut args, "--asset", &transfer.asset);
@@ -331,14 +322,8 @@ impl Rysk {
         args
     }
 
-    pub fn quote_args(
-        &self,
-        channel_id: &str,
-        rfq_id: &str,
-        quote: &Quote,
-    ) -> Result<Vec<String>, Error> {
+    pub fn quote_args(&self, rfq_id: &str, quote: &Quote) -> Result<Vec<String>, Error> {
         let mut args = vec!["quote".to_string()];
-        pair(&mut args, "--channel_id", channel_id);
         pair(&mut args, "--rfq_id", rfq_id);
         pair(&mut args, "--asset", &quote.asset_address);
         pair(&mut args, "--chain_id", quote.chain_id.to_string());
@@ -354,7 +339,7 @@ impl Rysk {
         if let Some(premium) = quote.premium_asset.as_deref().filter(|p| !p.is_empty()) {
             pair(&mut args, "--premium_asset", premium);
         }
-        args.extend(self.domain_args(quote)?);
+        args.extend(domain_args(quote, false)?);
         if quote.is_put {
             args.push("--is_put".into());
         }
@@ -364,48 +349,53 @@ impl Rysk {
         Ok(args)
     }
 
-    /// Turns a request's domain into the cli's domain flags. The cli takes the
-    /// domain's chain id from the quote, so a domain for another chain, or one
-    /// using a salt, cannot be signed and is rejected here rather than silently
-    /// signed against the wrong domain.
-    fn domain_args(&self, quote: &Quote) -> Result<Vec<String>, Error> {
-        let Some(domain) = quote.domain.as_ref() else {
-            return Ok(Vec::new());
-        };
-        check_shared_domain(domain, quote.chain_id, "quote domain")?;
+    // ------------------------------------------------------------ premium rfq
 
-        let missing: Vec<&str> = [
-            ("name", domain.name.as_deref()),
-            ("version", domain.version.as_deref()),
-            ("verifyingContract", domain.verifying_contract.as_deref()),
-        ]
-        .into_iter()
-        .filter(|(_, v)| v.map_or(true, str::is_empty))
-        .map(|(k, _)| k)
-        .collect();
-        if !missing.is_empty() {
-            return Err(Error::Domain(format!(
-                "quote domain: missing {}",
-                missing.join(", ")
-            )));
+    /// Opts an otoken in or out of redemption at expiry. Send it into a running
+    /// `connect` on the maker endpoint.
+    pub fn will_redeem_args(
+        &self,
+        chain_id: i64,
+        account: &str,
+        otoken: &str,
+        will_redeem: bool,
+        nonce: &str,
+    ) -> Vec<String> {
+        let mut args = vec!["will_redeem".to_string()];
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--account", account);
+        pair(&mut args, "--otoken", otoken);
+        pair(&mut args, "--nonce", nonce);
+        if will_redeem {
+            args.push("--will_redeem".into());
         }
-
-        let mut args = Vec::new();
-        pair(&mut args, "--domain_name", domain.name.as_deref().unwrap());
-        pair(
-            &mut args,
-            "--domain_version",
-            domain.version.as_deref().unwrap(),
-        );
-        pair(
-            &mut args,
-            "--domain_verifying_contract",
-            domain.verifying_contract.as_deref().unwrap(),
-        );
-        Ok(args)
+        args
     }
 
-    // ------------------------------------------------------------ premium rfq
+    /// Redeems the signer's own otokens that expired at or before `expiry`
+    /// (default: now). A plain http call, so run it with `execute`, not `send`.
+    /// `url` defaults to this env's api.
+    pub fn self_redeem_args(
+        &self,
+        chain_id: i64,
+        nonce: &str,
+        expiry: Option<i64>,
+        exclude_assets: &[&str],
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let default_url = format!("http{}", self.env.base_url()[2..].trim_end_matches('/'));
+        let mut args = vec!["self-redeem".to_string()];
+        pair(&mut args, "--url", url.unwrap_or(&default_url));
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        if let Some(expiry) = expiry {
+            pair(&mut args, "--expiry", expiry.to_string());
+        }
+        if !exclude_assets.is_empty() {
+            pair(&mut args, "--exclude_assets", exclude_assets.join(","));
+        }
+        args
+    }
 
     /// Base url of the premium rfq api. Left out of the args when not given, so
     /// the cli's own default (production) applies; pass it for a local or
@@ -415,37 +405,6 @@ impl Rysk {
             Some(url) => vec!["--url".to_string(), url.to_string()],
             None => Vec::new(),
         }
-    }
-
-    /// The premium api signs against the pool's option handler, which arrives on
-    /// the request as `typeDataDomain`. Only the verifying contract is
-    /// required (the cli defaults the name and version), but a domain it
-    /// cannot sign is rejected here rather than passed on.
-    fn premium_domain_args(&self, quote: &Quote) -> Result<Vec<String>, Error> {
-        let verifying = quote
-            .domain
-            .as_ref()
-            .and_then(|d| d.verifying_contract.as_deref())
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                Error::Domain(
-                    "premium quote domain: missing verifyingContract, pass the request's \
-                     typeDataDomain"
-                        .to_string(),
-                )
-            })?;
-        let domain = quote.domain.as_ref().expect("checked above");
-        check_shared_domain(domain, quote.chain_id, "premium quote domain")?;
-
-        let mut args = Vec::new();
-        if let Some(name) = domain.name.as_deref().filter(|n| !n.is_empty()) {
-            pair(&mut args, "--domain_name", name);
-        }
-        if let Some(version) = domain.version.as_deref().filter(|v| !v.is_empty()) {
-            pair(&mut args, "--domain_version", version);
-        }
-        pair(&mut args, "--domain_verifying_contract", verifying);
-        Ok(args)
     }
 
     /// Requests this maker may quote, each carrying the domain to sign against.
@@ -472,39 +431,6 @@ impl Rysk {
         args
     }
 
-    /// Signs and posts one quote. The terms have to be the request's - the api
-    /// rebuilds the signed message from the stored request, and `valid_until`
-    /// is in seconds, strictly between now+2min and now+10min.
-    pub fn premium_quote_args(
-        &self,
-        request_id: &str,
-        quote: &Quote,
-        url: Option<&str>,
-    ) -> Result<Vec<String>, Error> {
-        let mut args = vec!["premium".to_string(), "quote".to_string()];
-        pair(&mut args, "--request_id", request_id);
-        pair(&mut args, "--asset", &quote.asset_address);
-        pair(&mut args, "--chain_id", quote.chain_id.to_string());
-        pair(&mut args, "--expiry", quote.expiry.to_string());
-        pair(&mut args, "--strike", &quote.strike);
-        pair(&mut args, "--quantity", &quote.quantity);
-        pair(&mut args, "--usd", &quote.usd);
-        pair(&mut args, "--collateral", &quote.collateral_asset);
-        pair(&mut args, "--maker", &quote.maker);
-        pair(&mut args, "--nonce", &quote.nonce);
-        pair(&mut args, "--price", &quote.price);
-        pair(&mut args, "--valid_until", quote.valid_until.to_string());
-        args.extend(self.premium_domain_args(quote)?);
-        args.extend(self.premium_url_args(url));
-        if quote.is_put {
-            args.push("--is_put".into());
-        }
-        if quote.is_taker_buy {
-            args.push("--is_taker_buy".into());
-        }
-        Ok(args)
-    }
-
     /// Posts a batch of quotes in one call, reading them from `source`: a file
     /// path, or `-` for stdin. Build the file with [`Rysk::premium_quote_batch`].
     pub fn premium_quote_batch_args(&self, source: &str, url: Option<&str>) -> Vec<String> {
@@ -528,7 +454,7 @@ impl Rysk {
 
         let mut entries = Vec::with_capacity(quotes.len());
         for (request_id, quote) in quotes {
-            self.premium_domain_args(quote)?;
+            domain_args(quote, true)?;
             entries.push(Entry {
                 quote,
                 request_id: request_id.as_str(),
@@ -553,30 +479,141 @@ impl Rysk {
         args.extend(self.premium_url_args(url));
         args
     }
+
+    /// Taker: the pools requests can be opened on.
+    pub fn premium_pools_args(&self, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "pools".to_string()];
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: opens the requests in `source` (a json array, file path or `-` for
+    /// stdin). This key has to be an rfq signer on each request's pool.
+    pub fn premium_request_args(
+        &self,
+        source: &str,
+        chain_id: i64,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "request".to_string()];
+        pair(&mut args, "--batch", source);
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: a pool's live requests.
+    pub fn premium_taker_requests_args(&self, taker: &str, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "taker-requests".to_string()];
+        pair(&mut args, "--taker", taker);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: the live quotes on one request.
+    pub fn premium_request_quotes_args(&self, id: &str, url: Option<&str>) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "request-quotes".to_string()];
+        pair(&mut args, "--id", id);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: cancels a request and every quote on it.
+    pub fn premium_cancel_request_args(
+        &self,
+        id: &str,
+        chain_id: i64,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "cancel-request".to_string()];
+        pair(&mut args, "--id", id);
+        pair(&mut args, "--chain_id", chain_id.to_string());
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
+
+    /// Taker: takes a quote by id; the cli signs the confirmation and prints
+    /// the settlement's transaction hash.
+    pub fn premium_execute_args(
+        &self,
+        quote_id: &str,
+        nonce: &str,
+        url: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec!["premium".to_string(), "execute".to_string()];
+        pair(&mut args, "--quote_id", quote_id);
+        pair(&mut args, "--nonce", nonce);
+        args.extend(self.premium_url_args(url));
+        args
+    }
 }
 
-/// The two rejections both domains share: a salt cannot be signed, and a chain
-/// that is not the quote's would be signed against the wrong domain.
-fn check_shared_domain(
-    domain: &TypedDataDomain,
-    quote_chain_id: i64,
-    what: &str,
-) -> Result<(), Error> {
-    if domain.salt.as_deref().is_some_and(|s| !s.is_empty()) {
-        return Err(Error::Domain(format!("{what}: salt is not supported")));
+/// Turns a quote's domain into the cli's domain flags, rejecting one the cli
+/// could not sign - a salt, or another chain's chain id - rather than signing
+/// against the wrong domain. The websocket quote takes the domain all or
+/// nothing; a premium quote has to name the pool's option handler, and the cli
+/// defaults its name and version.
+fn domain_args(quote: &Quote, premium: bool) -> Result<Vec<String>, Error> {
+    let domain = match quote.domain.as_ref() {
+        None if !premium => return Ok(Vec::new()),
+        d => d,
+    };
+    let field =
+        |f: fn(&TypedDataDomain) -> Option<&str>| domain.and_then(f).filter(|v| !v.is_empty());
+    if field(|d| d.salt.as_deref()).is_some() {
+        return Err(Error::Domain("quote domain: salt is not supported".into()));
     }
-    if let Some(chain) = domain.chain_id.as_ref() {
-        if chain.as_i64() != Some(quote_chain_id) {
+    if let Some(chain) = domain.and_then(|d| d.chain_id.as_ref()) {
+        if chain.as_i64() != Some(quote.chain_id) {
             let shown = match chain {
                 crate::models::ChainId::Number(n) => n.to_string(),
                 crate::models::ChainId::Text(s) => s.clone(),
             };
             return Err(Error::Domain(format!(
-                "{what}: chainId {shown} does not match the quote's chain {quote_chain_id}"
+                "quote domain: chainId {shown} does not match the quote's chain {}",
+                quote.chain_id
             )));
         }
     }
-    Ok(())
+
+    let name = field(|d| d.name.as_deref());
+    let version = field(|d| d.version.as_deref());
+    let verifying = field(|d| d.verifying_contract.as_deref());
+    let required = [
+        ("name", name.is_some() || premium),
+        ("version", version.is_some() || premium),
+        ("verifyingContract", verifying.is_some()),
+    ];
+    let missing: Vec<&str> = required
+        .into_iter()
+        .filter(|(_, ok)| !ok)
+        .map(|(k, _)| k)
+        .collect();
+    if !missing.is_empty() {
+        return Err(Error::Domain(format!(
+            "quote domain: missing {}{}",
+            missing.join(", "),
+            if premium {
+                ", pass the request's typeDataDomain"
+            } else {
+                ""
+            }
+        )));
+    }
+
+    let mut args = Vec::new();
+    if let Some(name) = name {
+        pair(&mut args, "--domain_name", name);
+    }
+    if let Some(version) = version {
+        pair(&mut args, "--domain_version", version);
+    }
+    pair(&mut args, "--domain_verifying_contract", verifying.unwrap());
+    Ok(args)
 }
 
 #[cfg(test)]
@@ -599,7 +636,7 @@ mod tests {
     #[test]
     fn version_ordering_is_numeric_not_lexical() {
         assert!(parse_version("4.10.0") > parse_version("4.9.0"));
-        assert!(parse_version("3.2.0") < Some(MIN_CLI_VERSION));
-        assert!(parse_version("4.0.0") >= Some(MIN_CLI_VERSION));
+        assert!(parse_version("4.9.9") < Some(MIN_CLI_VERSION));
+        assert!(parse_version("5.1.0") >= Some(MIN_CLI_VERSION));
     }
 }

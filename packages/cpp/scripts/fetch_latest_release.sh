@@ -3,6 +3,16 @@
 GITHUB_REPO="${RYSK_CLI_REPO:-rysk-finance/sdks}"
 CLI_TAG_PREFIX="${RYSK_CLI_TAG_PREFIX:-cli-v}"
 
+# The one copy: `make sync-scripts` copies it into every sdk package, which
+# each publish on their own. Exits non zero on any failure.
+
+for dep in curl jq; do
+  if ! command -v "$dep" >/dev/null 2>&1; then
+    echo "Error: '$dep' is required to download the cli; install it and retry." >&2
+    exit 1
+  fi
+done
+
 # Function to fetch the latest CLI release from GitHub API
 # The monorepo publishes releases for several packages, so /releases/latest is
 # not necessarily the CLI. Pick the newest release tagged "${CLI_TAG_PREFIX}*".
@@ -68,8 +78,7 @@ main() {
   if [[ -n "$download_url" ]]; then
     echo "Download URL: $download_url"
     echo "Downloading to: ryskV12"
-    curl -L -o "ryskV12" "$download_url"
-    if [[ $? -eq 0 ]]; then
+    if curl -fL -o "ryskV12" "$download_url" && chmod +x ryskV12; then
       echo "Download complete!"
     else
       echo "Download failed!"

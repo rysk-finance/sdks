@@ -11,15 +11,17 @@ If the script fails to do so please navigate to https://github.com/rysk-finance/
 
 ### Process events
 
-`execute` returns a `CliWebSocket`, an `EventEmitter` with WebSocket-style handlers:
+`execute` returns a `CliWebSocket`, an `EventEmitter`. Listen with `.on(event, handler)`:
 
-| Event | Handler | Carries |
-| --- | --- | --- |
-| `open` | `onopen` | the process was spawned |
-| `message` | `onmessage` | a chunk of the CLI's stdout |
-| `stderr` | `onstderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
-| `close` | `onclose` | the exit code; a non-zero one is how a command reports failure |
-| `error` | `onerror` | the process itself failed to spawn or run |
+| Event | Carries |
+| --- | --- |
+| `open` | the process was spawned; fires on the next tick, so a listener attached right after `execute` hears it |
+| `message` | one line of the CLI's stdout: one message |
+| `stderr` | a chunk of the CLI's stderr — the CLI logs there, so this is not a failure |
+| `close` | the exit code; a non-zero one is how a command run on its own reports failure |
+| `error` | the process itself failed to spawn or run |
+
+`send(args)` writes a command into a running `connect` (see below), and `close()` ends the process.
 
 ### Core `execute` method
 
@@ -62,23 +64,19 @@ built CLI reports no version number and is left alone.
 ### Create a Connection
 
 ```ts
-const rfqChannel = "my-rfq-channel-id";
-const rfqURI = "rfqs/<assetAddress>"; // Example websocket endpoint
-
-const rfqProc = ryskSDK.execute(ryskSDK.connectArgs(rfqChannel, rfqURI));
-
-const makerChannel = "maker-channel";
-const makerURI = "maker";
-
-const makerProc = ryskSDK.execute(ryskSDK.connectArgs(makerChannel, makerURI));
+const rfqProc = ryskSDK.execute(ryskSDK.connectArgs("rfqs/<assetAddress>"));
+const makerProc = ryskSDK.execute(ryskSDK.connectArgs("maker"));
 ```
+
+Balances, positions, transfers and quotes are sent into a connection with `send`: the running
+`connect` signs and sends each one itself, so no process is spawned per command. A command it cannot
+run comes back as a `message`: a json-rpc error under the id the server would have used (the
+rfq id for a quote, the command name otherwise), so `isErrorData` catches it with the server's.
 
 ### Disconnect
 
 ```ts
-const makerChannel = "maker-channel";
-
-ryskSDK.execute(ryskSDK.disconnectArgs(makerChannel));
+makerProc.close();
 ```
 
 ### Approve spending
@@ -104,16 +102,12 @@ const proc = ryskSDK.execute(
 ### List USDC Balances
 
 ```ts
-const makerChannel = "maker-channel";
-const account = "0xabc";
-
-const proc = ryskSDK.execute(ryskSDK.balancesArgs(makerChannel, account));
+makerProc.send(ryskSDK.balancesArgs("0xabc"));
 ```
 
 ### Deposit / Withdraw
 
 ```ts
-const makerChannel = "maker-channel";
 const transferDetails: Transfer = {
   amount: "500000",
   asset: "0x...", // The asset address
@@ -122,24 +116,30 @@ const transferDetails: Transfer = {
   nonce: "some-unique-nonce",
 };
 
-const proc = ryskSDK.execute(
-  ryskSDK.transferArgs(makerChannel, transferDetails)
-);
+makerProc.send(ryskSDK.transferArgs(transferDetails));
 ```
 
 ### List Positions
 
 ```ts
-const makerChannel = "maker-channel";
-const account = "0xabc";
+makerProc.send(ryskSDK.positionsArgs("0xabc"));
+```
 
-const proc = ryskSDK.execute(ryskSDK.positionsArgs(makerChannel, account));
+### Redemption
+
+```ts
+// opt an otoken in (true) or out (false) of redemption at expiry, over the maker connection
+makerProc.send(ryskSDK.willRedeemArgs(84532, "0xabc", "0xotoken", true, "44"));
+
+// redeem your own expired otokens now - a plain http call to this env's api
+ryskSDK.execute(ryskSDK.selfRedeemArgs(84532, "45"));
+// or up to an expiry, skipping some assets
+ryskSDK.execute(ryskSDK.selfRedeemArgs(84532, "46", 1767225600, ["0xasset"]));
 ```
 
 ### Send a Quote
 
 ```ts
-const makerChannel = "maker-channel";
 const request_id = "some-uuid-from-server";
 const quoteDetails: Quote = {
   assetAddress: "0x...",
@@ -162,9 +162,7 @@ const quoteDetails: Quote = {
   domain: request.typeDataDomain,
 };
 
-const proc = ryskSDK.execute(
-  ryskSDK.quoteArgs(makerChannel, request_id, quoteDetails)
-);
+makerProc.send(ryskSDK.quoteArgs(request_id, quoteDetails));
 ```
 
 `domain` needs `name`, `version` and `verifyingContract` together; its `chainId`
@@ -173,7 +171,7 @@ always comes from the quote, so a domain for another chain - or one carrying a
 
 ### Premium RFQ (maker)
 
-The premium RFQ api is plain HTTP, so these need no connection and no channel: each one runs the CLI
+The premium RFQ api is plain HTTP, so these need no connection: each one runs the CLI
 once and prints the api's response on stdout. `url` is optional — leave it out for production, pass
 it for a local or staging api.
 
@@ -181,7 +179,7 @@ it for a local or staging api.
 // requests this maker may quote, each with the domain to sign against
 const requests = ryskSDK.execute(ryskSDK.premiumRequestsArgs(maker));
 
-// sign and post one quote for a request
+// sign and post quotes: one or a whole strip, in one api call
 const quote: Quote = {
   ...quoteDetails,
   maker,
@@ -190,14 +188,8 @@ const quote: Quote = {
   validUntil: Math.floor(Date.now() / 1000) + 300, // SECONDS, now+2min .. now+10min
   domain: request.typeDataDomain,           // the pool's option handler
 };
-const proc = ryskSDK.execute(ryskSDK.premiumQuoteArgs(request.id, quote));
-
-// a whole strip in one api call
-writeFileSync("batch.json", ryskSDK.premiumQuoteBatch([
-  { requestId: request.id, quote: quoteA },
-  { requestId: request.id, quote: quoteB },
-]));
-ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
+writeFileSync("batch.json", ryskSDK.premiumQuoteBatch([{ requestId: request.id, quote }]));
+const proc = ryskSDK.execute(ryskSDK.premiumQuoteBatchArgs("batch.json"));
 
 // your live quotes (the only source of quote ids), one quote, and a cancel
 ryskSDK.execute(ryskSDK.premiumQuotesArgs(maker));
@@ -216,32 +208,26 @@ response and exits non zero when that array is not empty, so check the exit code
 Nonces are spent once and share one keyspace per address across quotes and cancels — draw them from a
 single persisted counter.
 
-## Examples
+### Premium RFQ (taker)
 
-Two runnable maker loops live in `examples/`, one per transport:
-
-| File | What it does |
-| --- | --- |
-| `examples/run.js` | Websocket flow: holds the maker connection open, listens for RFQs on an asset, prices them and sends signed quotes back through the maker channel. Also reads balances and positions, and disconnects both channels on `SIGINT`. |
-| `examples/premium.js` | Premium RFQ flow: polls the requests this maker may quote, prices them, posts the batch in one api call, matches quote ids back from the listing, refreshes each quote before its 10 minute window closes, and pulls everything on `SIGINT`. |
-
-```sh
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> node examples/run.js
-
-RYSK_SDK_PK=<hex private key> RYSK_MAKER=0x<maker address> \
-  PREMIUM_URL=https://insti-testnet.rysk.finance node examples/premium.js
-```
-
-Both keep their nonce counter in a `.rysk-nonce` file through `NonceCounter`, because a nonce is spent
-once per address and a counter that rewinds after a restart starts failing every write. `priceRequest`
-is the only part meant to be replaced — everything else is the plumbing the api expects.
+A request's taker is a pool; the SDK's key has to be one of the pool's on chain RFQ signers.
 
 ```ts
-import { NonceCounter } from "ryskv12";
+ryskSDK.execute(ryskSDK.premiumPoolsArgs());
 
-const nonces = new NonceCounter(".rysk-nonce"); // one counter per signing key
-const quoteNonce = nonces.next();               // decimal string, never reused, never rewound
+// a json array of requests as the api takes them; answers with no body
+writeFileSync("requests.json", JSON.stringify([request]));
+ryskSDK.execute(ryskSDK.premiumRequestArgs("requests.json", chainId, "44"));
+
+ryskSDK.execute(ryskSDK.premiumTakerRequestsArgs(pool));       // the pool's live requests
+ryskSDK.execute(ryskSDK.premiumRequestQuotesArgs(requestId));  // the quotes on one
+ryskSDK.execute(ryskSDK.premiumCancelRequestArgs(requestId, chainId, "45"));
+
+// take a quote: prints the settling transaction's hash
+ryskSDK.execute(ryskSDK.premiumExecuteArgs(quoteId, "46"));
 ```
+
+See the CLI README for the request fields; note a request's `validUntil` is in **milliseconds**.
 
 ## Tests
 
@@ -252,3 +238,8 @@ make dev-bin && yarn test     # + the integration tests, which need a cli
 
 `test/integration.test.js` runs the real CLI against a fake api, so the arg builders and the binary
 cannot drift apart. Those tests skip themselves when no CLI is present.
+
+The `testnet` test at the bottom of `test/integration.test.js` is the full premium flow end to end
+against the real testnet api — a taker opens an rfq, the maker quotes, cancels and requotes, and
+the taker takes the trade on chain. Read it as the worked example. It skips unless the e2e keys are
+set; `make e2e` from the repo root loads them from `.env`.
